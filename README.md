@@ -89,6 +89,7 @@ generated helpers and automations to Home Assistant.
 Both harnesses run without Docker or Home Assistant:
 
 ```bash
+python tools/doctor.py                             # check a real Home Assistant
 python tools/sweep.py                              # a year of section boundaries
 python tools/compare_analyser.py heartbeat.csv     # diff two analyser versions
 ```

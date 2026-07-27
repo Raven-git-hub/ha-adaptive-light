@@ -8,7 +8,8 @@
 | 3 | Analyser ported from n8n with per-group eligibility | **done** — `app/analyser.py` |
 | 4 | Generator for helpers and automations | **done** — `app/generator.py` |
 | 5a | Scheduler: boundary computation and collapse | **done** — `app/scheduler.py` |
-| 5b | Runtime: websocket client, catch-up, observer, reactive detector, almanac push | next |
+| 5b-i | HA client (REST + WebSocket) and connection doctor | **done** — `app/ha.py`, `tools/doctor.py` |
+| 5b-ii | Runtime: catch-up, observer, reactive detector, almanac push | next |
 | 6 | UI page 2 — configuration | |
 | 7 | UI page 1 — live analysis graph | |
 | 8 | UI page 3 — deploy and entity health check | |
@@ -18,7 +19,7 @@
 
 - **Coordinates.** The year sweep has been run against sample sites, not the
   real installation. Zero collapses are expected below ~45° latitude.
-- **Template native types.** The maintenance automation assigns
+- **Template native types.** Answered by `tools/doctor.py`. The maintenance automation assigns
   `state_attr()` to a variable and subscripts it. Recent Home Assistant
   renders template variables to native Python types, but this is unverified
   on hardware. If it returns a string, `alm.get('lux_target')` fails silently
@@ -27,7 +28,7 @@
   {% set alm = state_attr('sensor.al_almanac_main_room', 'day') %}
   {{ alm is mapping }} / {{ alm.get('lux_target') }}
   ```
-- **Helper creation over WebSocket.** Creating helpers via
+- **Helper creation over WebSocket.** Answered by `tools/doctor.py`. Creating helpers via
   `input_boolean/create` and friends is the frontend's own path, not a
   documented public API. Needs an hour's spike. If it fails, the fallback is
   generated YAML and a copy-paste step — the generator's output is identical
