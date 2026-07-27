@@ -9,20 +9,12 @@ of it.
     export AL_HA_TOKEN=...
     PYTHONPATH=. python tools/doctor.py
 
-It answers the two open questions in docs/ROADMAP.md:
-
-  * whether a template variable assigned from state_attr() survives as a
-    dict, or is stringified - if stringified, the generated maintenance
-    automation fails silently and never nudges;
-
-  * whether helpers can be created over the WebSocket API, which decides
-    whether deployment is one click or a copy-paste step.
-
 Everything it creates, it removes.
 """
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import os
 import sys
@@ -101,7 +93,7 @@ async def main() -> int:
             record(FAIL, "WebSocket did not authenticate within 15s")
             return 1
 
-        # -- template native types (ROADMAP open item) -----------------
+        # -- template native types -------------------------------------
         await rest.set_state(
             PROBE_SENSOR, "2026-07-27",
             {"day": {"lux_target": 42.5, "tv_light": 128,
@@ -114,8 +106,11 @@ async def main() -> int:
             "{{ alm is mapping }}|{{ alm.get('lux_target') }}" % PROBE_SENSOR
         )).strip()
 
+        # HA renders a template variable to a string and parses it back
+        # with literal_eval. Rendering state_attr() directly shows
+        # whether that round-trip reconstructs the dict.
         roundtrip = (await rest.render_template(
-            "{%% set raw = '{{ state_attr(\"%s\",\"day\") }}' %%}{{ raw }}" % PROBE_SENSOR
+            "{{ state_attr('%s','day') }}" % PROBE_SENSOR
         )).strip()
 
         if direct.startswith("True|42.5"):
@@ -126,18 +121,24 @@ async def main() -> int:
                    f"rendered: {direct!r} - the generated maintenance "
                    "automation would fail silently. Report this.")
 
-        record(OK if "lux_target" in roundtrip else WARN,
-               "Template variable round-trip",
-               f"rendered: {roundtrip[:90]}")
+        try:
+            parsed = ast.literal_eval(roundtrip)
+        except (ValueError, SyntaxError):
+            parsed = None
+        if isinstance(parsed, dict) and parsed.get("lux_target") == 42.5:
+            record(OK, "Template variable round-trip reconstructs a dict",
+                   f"rendered: {roundtrip[:80]}")
+        else:
+            record(FAIL, "Template variable round-trip does not reconstruct a dict",
+                   f"rendered: {roundtrip[:80]!r} - generated automations must "
+                   "call state_attr() inline rather than via a variable.")
 
-        # -- helper creation over WebSocket (ROADMAP open item) ---------
-        helper_ok = False
+        # -- helper creation over WebSocket ----------------------------
         try:
             created = await ws.create_helper(
                 "input_boolean",
                 {"name": "AL Doctor Probe", "icon": "mdi:test-tube"},
             )
-            helper_ok = True
             record(OK, "Helpers can be created over the WebSocket API",
                    "Deployment can be fully automatic - no copy-paste step.")
             hid = (created or {}).get("id")
@@ -149,22 +150,57 @@ async def main() -> int:
                    f"{type(exc).__name__}: {exc}\n         "
                    "Falls back to generated YAML plus a paste step.")
 
-        # -- existing entities that would collide ----------------------
+        # -- automation creation over REST -----------------------------
+        probe_id = "al_doctor_probe_automation"
+        try:
+            await rest._request(
+                "POST", f"/api/config/automation/config/{probe_id}",
+                json={"id": probe_id, "alias": "AL Doctor Probe (delete me)",
+                      "description": "Created by tools/doctor.py; removed immediately.",
+                      "mode": "single", "triggers": [], "conditions": [],
+                      "actions": []},
+            )
+            record(OK, "Automations can be written over the REST API",
+                   "Deployment needs no copy-paste and no HA restart.")
+            await rest._request(
+                "DELETE", f"/api/config/automation/config/{probe_id}")
+            record(OK, "Probe automation removed")
+        except Exception as exc:
+            record(WARN, "Automation creation over REST unavailable",
+                   f"{type(exc).__name__}: {exc}\n         "
+                   "Falls back to generated YAML plus a paste step.")
+
+        # -- prototype entities ----------------------------------------
+        # Exact names only. A prefix match on input_boolean.scene_ sweeps
+        # up unrelated helpers - the user's own scene toggles look the same.
         states = await rest.states()
-        legacy = sorted(
-            s["entity_id"] for s in states
-            if s["entity_id"].startswith((
-                "input_boolean.scene_", "input_boolean.adaptive_light",
-                "timer.adaptive_light", "input_number.reactive_",
-                "input_text.reactive_", "sensor.adaptive_light_almanac",
-            ))
-        )
+        KNOWN = {
+            "input_boolean.adaptive_light_automation_active",
+            "timer.adaptive_light_reactive_window",
+            "sensor.adaptive_light_almanac",
+        } | {f"input_boolean.scene_{n}" for n in
+             ("morning", "day_time", "afternoon", "evening", "late", "night")} \
+          | {f"input_number.reactive_group_{i}_before" for i in (1, 2, 3, 4)} \
+          | {"input_number.reactive_lux_before",
+             "input_text.reactive_timestamp", "input_text.reactive_groups_changed"}
+
+        ids = {s["entity_id"] for s in states}
+        legacy = sorted(ids & KNOWN)
+        maybe = sorted(e for e in ids
+                       if e.startswith("input_boolean.scene_") and e not in KNOWN)
         if legacy:
-            record(WARN, f"{len(legacy)} prototype entities still present",
-                   "Delete these before deploying, or HA will create "
-                   "_2-suffixed duplicates:\n         " + "\n         ".join(legacy))
+            record(WARN, f"{len(legacy)} prototype entities from the n8n system",
+                   "These do NOT clash with the new names, so nothing breaks by\n"
+                   "         leaving them. Remove at cutover, AFTER disabling the\n"
+                   "         prototype's automations and the n8n workflow -\n"
+                   "         otherwise two systems drive the same lights:\n         "
+                   + "\n         ".join(legacy))
         else:
             record(OK, "No prototype entities to clean up")
+        if maybe:
+            record(WARN, f"{len(maybe)} similar entities - NOT Adaptive Light's",
+                   "Left alone; check they are yours before touching:\n         "
+                   + "\n         ".join(maybe))
 
         lights = sum(1 for s in states if s["entity_id"].startswith("light."))
         lux = sum(1 for s in states

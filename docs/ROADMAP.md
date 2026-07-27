@@ -15,21 +15,47 @@
 | 8 | UI page 3 — deploy and entity health check | |
 | 9 | Home Assistant add-on packaging | |
 
+## Verified against Home Assistant 2026.7.4
+
+Run of `tools/doctor.py`, 27 July 2026:
+
+- **Coordinates** 22.354 N, 114.061 E, `Asia/Hong_Kong`. Year sweep: **zero
+  collapsed sections** across 2026. Note that `earliest(sunrise, 05:30)` resolves
+  to 05:30 every day of the year here, since local sunrise never falls before
+  05:39 - the sun component never wins, and in late December the Sunrise section
+  begins some 93 minutes before it is actually light.
+- **Template native types** confirmed. `state_attr()` returns a mapping inside a
+  template, and a template variable round-trips through `literal_eval` back into
+  a dict. The generator's `variables:` approach is safe as written.
+- **Helper creation over WebSocket** confirmed working.
+- **Automation creation over REST** confirmed working.
+
+Deployment is therefore fully automatic: no YAML export, no copy-paste, no
+`configuration.yaml` edit, no restart.
+
+## Verified against Home Assistant 2026.7.4
+
+Run of `tools/doctor.py`, 27 July 2026:
+
+- **Coordinates** 22.354 N, 114.061 E, `Asia/Hong_Kong`. Year sweep: **zero
+  collapsed sections** across 2026. Note that `earliest(sunrise, 05:30)` resolves
+  to 05:30 every day of the year here, since local sunrise never falls before
+  05:39 - the sun component never wins, and in late December the Sunrise section
+  begins some 93 minutes before it is actually light.
+- **Template native types** confirmed. `state_attr()` returns a mapping inside a
+  template, and a template variable round-trips through `literal_eval` back into
+  a dict. The generator's `variables:` approach is safe as written.
+- **Helper creation over WebSocket** confirmed working.
+- **Automation creation over REST** confirmed working.
+
+Deployment is therefore fully automatic: no YAML export, no copy-paste, no
+`configuration.yaml` edit, no restart.
+
 ## Open items
 
-- **Coordinates.** The year sweep has been run against sample sites, not the
-  real installation. Zero collapses are expected below ~45° latitude.
-- **Template native types.** Answered by `tools/doctor.py`. The maintenance automation assigns
-  `state_attr()` to a variable and subscripts it. Recent Home Assistant
-  renders template variables to native Python types, but this is unverified
-  on hardware. If it returns a string, `alm.get('lux_target')` fails silently
-  and maintenance never nudges. Check in Developer Tools → Template:
-  ```jinja
-  {% set alm = state_attr('sensor.al_almanac_main_room', 'day') %}
-  {{ alm is mapping }} / {{ alm.get('lux_target') }}
-  ```
-- **Helper creation over WebSocket.** Answered by `tools/doctor.py`. Creating helpers via
-  `input_boolean/create` and friends is the frontend's own path, not a
-  documented public API. Needs an hour's spike. If it fails, the fallback is
-  generated YAML and a copy-paste step — the generator's output is identical
-  either way.
+- **Cutover.** The prototype's automations and the n8n workflow are still live.
+  They must be disabled before the container takes over, or two systems will
+  drive the same lights from two different almanacs. The prototype's 16 helpers
+  do not clash with the new names and can be removed afterwards at leisure.
+- **One illuminance sensor for 24 lights.** Each room needs its own, so only one
+  room can be configured until more are added.
