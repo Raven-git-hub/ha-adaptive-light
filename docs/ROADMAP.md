@@ -12,7 +12,8 @@
 | 5b-ii | Storage layer: dual CSV/SQLite writes, event log, CSV re-ingest | **done** — `app/store.py` |
 | 5b-iii | Config loader: schema validation, defaults, cross-reference checks | **done** — `app/config.py` |
 | 5b-iv | Runtime: scheduler, observer, reactive detector, almanac push | **done** — `app/runtime.py` |
-| 6 | UI page 2 — configuration | next |
+| 6a | Config API and deployment to Home Assistant | **done** — `app/deploy.py`, endpoints in `app/main.py` |
+| 6b | UI page 2 — configuration | next |
 | 7 | UI page 1 — live analysis graph | |
 | 8 | UI page 3 — deploy and entity health check | |
 | 9 | Home Assistant add-on packaging | |

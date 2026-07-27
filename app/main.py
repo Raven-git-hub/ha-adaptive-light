@@ -10,10 +10,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
-from app.config import Config, ConfigError, blank, load, save
+from app.config import Config, ConfigError, blank, load, loads, save
+from app.deploy import check as deploy_check
+from app.deploy import deploy
 from app.runtime import Runtime
 from app.store import Store
 
@@ -144,3 +146,81 @@ async def api_run_analysis() -> dict:
         return {"ok": False, "error": "runtime not started"}
     await state.runtime.run_analysis()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------
+
+async def _restart_runtime() -> None:
+    """Apply a config change without restarting the container."""
+    if state.runtime:
+        await state.runtime.stop()
+        state.runtime = None
+    if state.config and state.config.active_rooms and state.config.homeassistant.token:
+        state.runtime = Runtime(state.config, state.store)
+        await state.runtime.start()
+
+
+@app.get("/api/config")
+def api_get_config() -> dict:
+    """The stored document. The token is never included - it comes from
+    the environment and is stripped on save."""
+    if not CONFIG_PATH.exists():
+        return blank()
+    doc = json.loads(CONFIG_PATH.read_text())
+    doc.get("homeassistant", {}).pop("access_token", None)
+    return doc
+
+
+@app.put("/api/config")
+async def api_put_config(doc: dict = Body(...)) -> dict:
+    """Validate, persist, then reload the runtime in place.
+
+    Validation happens before anything is written: a config that would
+    not load must not be able to replace one that does.
+    """
+    try:
+        config = loads(doc, SCHEMA_DIR / "config.schema.json")
+    except ConfigError as exc:
+        raise HTTPException(status_code=422,
+                            detail={"problems": exc.problems}) from exc
+
+    save(doc, CONFIG_PATH)
+    state.config = config
+    state.error = None
+    if state.store:
+        state.store.save_config_version(config.raw)
+    await _restart_runtime()
+    return {"ok": True, "rooms": len(config.active_rooms)}
+
+
+# ---------------------------------------------------------------------
+# Deployment
+# ---------------------------------------------------------------------
+
+@app.get("/api/deploy/check")
+async def api_deploy_check() -> dict:
+    """Does Home Assistant already hold what the config expects?
+    Read-only; drives the "deploy needed" indicator in the UI."""
+    if not state.config:
+        raise HTTPException(status_code=409, detail="no usable configuration")
+    if not state.runtime:
+        raise HTTPException(status_code=409,
+                            detail="not connected to Home Assistant")
+    return await deploy_check(state.config, state.runtime.rest)
+
+
+@app.post("/api/deploy")
+async def api_deploy() -> dict:
+    """Create the helpers and automations, and remove orphans."""
+    if not state.config:
+        raise HTTPException(status_code=409, detail="no usable configuration")
+    if not state.runtime:
+        raise HTTPException(status_code=409,
+                            detail="not connected to Home Assistant")
+    report = await deploy(state.config, state.runtime.rest,
+                          state.runtime.ws, state.store)
+    # Newly created automations need mapping before they can be fired.
+    await state.runtime._map_automations()
+    return report.as_dict()
