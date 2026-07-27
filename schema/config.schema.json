@@ -5,100 +5,150 @@
   "description": "Single source of truth for the Adaptive Light container. Everything downstream is a pure function of this document: the YAML/helper generator, the scene scheduler, the analyser, and both UI pages. Learned data (almanacs) is NOT stored here - it lives in the almanac store and is regenerated nightly.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "homeassistant", "system", "schedule", "rooms"],
-
+  "required": [
+    "version",
+    "homeassistant",
+    "system",
+    "schedule",
+    "rooms"
+  ],
   "properties": {
     "version": {
       "const": 1,
       "description": "Schema version. Bumped only on breaking changes; the container migrates forward on load."
     },
-
     "homeassistant": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["base_url"],
+      "required": [
+        "base_url"
+      ],
       "properties": {
         "base_url": {
           "type": "string",
           "format": "uri",
           "description": "e.g. http://192.168.1.251:8123 - no trailing slash.",
-          "examples": ["http://192.168.1.251:8123"]
+          "examples": [
+            "http://192.168.1.251:8123"
+          ]
         },
         "access_token": {
           "type": "string",
           "description": "Long-lived access token. Held in a separate secrets file at runtime (chmod 600) and REDACTED from any config export or backup download. Present in this schema only so the shape is documented."
         },
-        "verify_ssl": { "type": "boolean", "default": true },
+        "verify_ssl": {
+          "type": "boolean",
+          "default": true
+        },
         "reconnect_backoff_seconds": {
           "type": "array",
-          "items": { "type": "integer", "minimum": 1 },
-          "default": [1, 2, 5, 10, 30, 60],
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "default": [
+            1,
+            2,
+            5,
+            10,
+            30,
+            60
+          ],
           "description": "WebSocket reconnect ladder. Final value repeats indefinitely."
         }
       }
     },
-
     "system": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "heartbeat_interval_minutes": {
-          "type": "integer", "minimum": 1, "maximum": 60, "default": 10,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60,
+          "default": 10,
           "description": "Observation cadence. A heartbeat is DEFERRED (not skipped) while a room's guard boolean is on, so it never samples a light mid-transition."
         },
         "reactive_window_seconds": {
-          "type": "integer", "minimum": 10, "maximum": 600, "default": 120,
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 600,
+          "default": 120,
           "description": "After the first user-originated brightness change, the container keeps collecting further changes for this long before writing one consolidated reactive event."
         },
         "reactive_min_delta": {
-          "type": "integer", "minimum": 0, "maximum": 255, "default": 5,
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 5,
           "description": "A group only counts as genuinely changed if |after - before| exceeds this. Filters out rounding noise and transition echo."
         },
         "reactive_suspends_maintenance": {
-          "type": "boolean", "default": true,
+          "type": "boolean",
+          "default": true,
           "description": "When true, a reactive event suspends Lux Maintenance for that room until the next scene crossover, so the system does not spend the rest of the section undoing what the user just did. Implemented via a DEDICATED hold boolean (input_boolean.al_hold_<room>), not the guard boolean: the guard also gates heartbeat deferral, so reusing it would silently stop observation for the rest of the section. The container clears the hold at every crossover."
         },
         "data_dir": {
-          "type": "string", "default": "/data",
+          "type": "string",
+          "default": "/data",
           "description": "Container volume root. Contains csv/, db/, almanac/, config/."
         },
         "csv_enabled": {
-          "type": "boolean", "default": true,
+          "type": "boolean",
+          "default": true,
           "description": "Write human-readable CSV alongside SQLite. SQLite is always rebuildable from CSV, so the container holds no irreplaceable state."
         },
         "event_log_retention_days": {
-          "type": "integer", "minimum": 1, "default": 90,
+          "type": "integer",
+          "minimum": 1,
+          "default": 90,
           "description": "Retention for the UI event log. Heartbeat and reactive history are never auto-pruned."
         }
       }
     },
-
     "schedule": {
       "$ref": "#/$defs/schedule",
       "description": "Global default schedule. Rooms inherit this unless they set schedule_override."
     },
-
     "learning": {
       "type": "object",
       "additionalProperties": false,
       "description": "Analyser tuning. Defaults reproduce the proven n8n behaviour exactly - change nothing here to keep current results.",
       "properties": {
-        "lookback_days": { "type": "integer", "minimum": 1, "default": 21 },
+        "lookback_days": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 21
+        },
         "publish_delay_days": {
-          "type": "integer", "minimum": 0, "default": 2,
+          "type": "integer",
+          "minimum": 0,
+          "default": 2,
           "description": "Almanac is valid from (last complete day + this). Ensures only complete days feed a published almanac and prevents big swings. IGNORED while _meta.mode is 'bootstrap' so a fresh install comes alive on day two."
         },
         "bootstrap_min_days": {
-          "type": "integer", "minimum": 1, "default": 7,
+          "type": "integer",
+          "minimum": 1,
+          "default": 7,
           "description": "Days of data required before _meta.mode flips from 'bootstrap' to 'learning'."
         },
         "reactive_weight": {
-          "type": "number", "minimum": 1, "default": 5,
+          "type": "number",
+          "minimum": 1,
+          "default": 5,
           "description": "Sample weight of a reactive event relative to a heartbeat."
         },
         "post_reactive_boost": {
-          "type": "array", "items": { "type": "number", "minimum": 1 },
-          "default": [3, 2, 1.5],
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 1
+          },
+          "default": [
+            3,
+            2,
+            1.5
+          ],
           "description": "Weights applied to the next N heartbeats after a reactive event, in order."
         },
         "recency_weights": {
@@ -107,17 +157,41 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["max_age_days", "weight"],
+            "required": [
+              "max_age_days",
+              "weight"
+            ],
             "properties": {
-              "max_age_days": { "type": ["integer", "null"], "description": "null = catch-all." },
-              "weight": { "type": "number", "minimum": 0 }
+              "max_age_days": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "null = catch-all."
+              },
+              "weight": {
+                "type": "number",
+                "minimum": 0
+              }
             }
           },
           "default": [
-            { "max_age_days": 3, "weight": 3 },
-            { "max_age_days": 7, "weight": 2 },
-            { "max_age_days": 14, "weight": 1 },
-            { "max_age_days": null, "weight": 0.5 }
+            {
+              "max_age_days": 3,
+              "weight": 3
+            },
+            {
+              "max_age_days": 7,
+              "weight": 2
+            },
+            {
+              "max_age_days": 14,
+              "weight": 1
+            },
+            {
+              "max_age_days": null,
+              "weight": 0.5
+            }
           ]
         },
         "confidence": {
@@ -125,44 +199,59 @@
           "additionalProperties": false,
           "description": "Per-day-per-scene confidence banding and the multiplier each band contributes to the rolling average.",
           "properties": {
-            "high_weight_threshold": { "type": "number", "default": 30 },
-            "medium_weight_threshold": { "type": "number", "default": 10 },
-            "high_multiplier": { "type": "number", "default": 1.5 },
-            "medium_multiplier": { "type": "number", "default": 1.0 },
-            "low_multiplier": { "type": "number", "default": 0.5 }
+            "high_weight_threshold": {
+              "type": "number",
+              "default": 30
+            },
+            "medium_weight_threshold": {
+              "type": "number",
+              "default": 10
+            },
+            "high_multiplier": {
+              "type": "number",
+              "default": 1.5
+            },
+            "medium_multiplier": {
+              "type": "number",
+              "default": 1.0
+            },
+            "low_multiplier": {
+              "type": "number",
+              "default": 0.5
+            }
           }
         }
       }
     },
-
     "rooms": {
       "type": "array",
-      "minItems": 1,
-      "items": { "$ref": "#/$defs/room" }
+      "minItems": 0,
+      "items": {
+        "$ref": "#/$defs/room"
+      },
+      "description": "Rooms. An empty list is valid and is the fresh-install state: the container starts, serves the UI, and does nothing until the first room is added."
     }
   },
-
   "$defs": {
-
     "slug": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]{0,30}$",
       "description": "Lowercase identifier safe for use in a Home Assistant object_id. Immutable once created - changing it orphans generated helpers and historical data."
     },
-
     "entity_id": {
       "type": "string",
       "pattern": "^[a-z_]+\\.[a-z0-9_]+$",
       "description": "Fully qualified Home Assistant entity_id. Never a device_id: device IDs are opaque, break on re-pairing, and cannot be validated by the entity-existence check.",
-      "examples": ["light.dining_area", "sensor.main_room_illuminance"]
+      "examples": [
+        "light.dining_area",
+        "sensor.main_room_illuminance"
+      ]
     },
-
     "clock_time": {
       "type": "string",
       "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
       "description": "Local wall-clock time, 24h. Timezone comes from Home Assistant's /api/config - never configured separately."
     },
-
     "trigger": {
       "description": "How a section's start time is computed each day. Sun times are read from HA's sun.sun entity so the container and HA can never disagree.",
       "oneOf": [
@@ -170,22 +259,42 @@
           "type": "object",
           "title": "Fixed clock time",
           "additionalProperties": false,
-          "required": ["type", "time"],
+          "required": [
+            "type",
+            "time"
+          ],
           "properties": {
-            "type": { "const": "clock" },
-            "time": { "$ref": "#/$defs/clock_time" }
+            "type": {
+              "const": "clock"
+            },
+            "time": {
+              "$ref": "#/$defs/clock_time"
+            }
           }
         },
         {
           "type": "object",
           "title": "Sun-relative",
           "additionalProperties": false,
-          "required": ["type", "event"],
+          "required": [
+            "type",
+            "event"
+          ],
           "properties": {
-            "type": { "const": "sun" },
-            "event": { "enum": ["sunrise", "sunset"] },
+            "type": {
+              "const": "sun"
+            },
+            "event": {
+              "enum": [
+                "sunrise",
+                "sunset"
+              ]
+            },
             "offset_minutes": {
-              "type": "integer", "minimum": -720, "maximum": 720, "default": 0,
+              "type": "integer",
+              "minimum": -720,
+              "maximum": 720,
+              "default": 0,
               "description": "Signed offset. e.g. -180 for 'sunset minus three hours'."
             }
           }
@@ -195,107 +304,165 @@
           "title": "Earliest / latest of several",
           "description": "Composite. 'earliest' models the spec's 'Sunrise or 05:30, whichever is earlier'.",
           "additionalProperties": false,
-          "required": ["type", "of"],
+          "required": [
+            "type",
+            "of"
+          ],
           "properties": {
-            "type": { "enum": ["earliest", "latest"] },
+            "type": {
+              "enum": [
+                "earliest",
+                "latest"
+              ]
+            },
             "of": {
               "type": "array",
               "minItems": 2,
-              "items": { "$ref": "#/$defs/trigger" }
+              "items": {
+                "$ref": "#/$defs/trigger"
+              }
             }
           }
         }
       ]
     },
-
     "section": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "trigger"],
+      "required": [
+        "id",
+        "name",
+        "trigger"
+      ],
       "properties": {
         "id": {
-          "enum": ["sunrise", "day", "afternoon", "sunset", "night", "sleep"],
+          "enum": [
+            "sunrise",
+            "day",
+            "afternoon",
+            "sunset",
+            "night",
+            "sleep"
+          ],
           "description": "Canonical section identifier. Fixed set - these six and only these six. Note 'sunrise'/'sunset' here are SECTION names; the astronomical events they may reference live under trigger.event."
         },
         "name": {
-          "type": "string", "minLength": 1,
+          "type": "string",
+          "minLength": 1,
           "description": "Display name. Free text, changeable at will - only id is load-bearing."
         },
-        "trigger": { "$ref": "#/$defs/trigger" },
+        "trigger": {
+          "$ref": "#/$defs/trigger"
+        },
         "priority": {
-          "type": "integer", "minimum": 0, "maximum": 1000,
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000,
           "description": "Collision priority. Higher wins. Default 100 for clock triggers, 50 for sun-relative: a fixed time states a fact about the user's routine that holds whatever the sun does, whereas a sun-relative time encodes an assumption about daylight that a collision has already falsified. Ties break toward the earlier section in canonical order."
         }
       }
     },
-
     "schedule": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["sections"],
+      "required": [
+        "sections"
+      ],
       "properties": {
         "sections": {
           "type": "array",
           "minItems": 6,
           "maxItems": 6,
-          "items": { "$ref": "#/$defs/section" },
+          "items": {
+            "$ref": "#/$defs/section"
+          },
           "description": "All six sections, always. Order in the array is canonical order (sunrise -> sleep), not necessarily chronological order on any given day."
         },
         "collision_policy": {
-          "enum": ["collapse", "clamp"],
+          "enum": [
+            "collapse",
+            "clamp"
+          ],
           "default": "collapse",
           "description": "What to do when computed boundaries cross (e.g. UK summer sunset at 21:20 landing after night at 20:30, or a Nordic December where sunrise+3 overtakes sunset-3). 'collapse': the lower-priority section is skipped entirely for that day - honest about what happened. 'clamp': every section is forced to survive by shifting boundaries - keeps all six alive but silently distorts the times the user asked for."
         },
         "min_section_minutes": {
-          "type": "integer", "minimum": 0, "default": 30,
+          "type": "integer",
+          "minimum": 0,
+          "default": 30,
           "description": "A section shorter than this is collapsed. Prevents a two-minute section firing a 120s-transition scene that is overridden before it completes."
         }
       }
     },
-
     "group": {
       "type": "object",
       "description": "One controllable light unit. If the user wants several bulbs treated as one, they make a light group in Home Assistant and give us the group's entity_id - HA works out the rest.",
       "additionalProperties": false,
-      "required": ["id", "name", "entity_id"],
+      "required": [
+        "id",
+        "name",
+        "entity_id"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/slug", "description": "Stable key. Used as the CSV column header and the almanac key, replacing the old positional group_1..group_4 scheme." },
-        "name": { "type": "string", "minLength": 1, "description": "Friendly display name." },
-        "entity_id": { "$ref": "#/$defs/entity_id" }
+        "id": {
+          "$ref": "#/$defs/slug",
+          "description": "Stable key. Used as the CSV column header and the almanac key, replacing the old positional group_1..group_4 scheme."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Friendly display name."
+        },
+        "entity_id": {
+          "$ref": "#/$defs/entity_id"
+        }
       }
     },
-
     "group_scene_config": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode"],
+      "required": [
+        "mode"
+      ],
       "properties": {
         "mode": {
-          "enum": ["auto", "off"],
+          "enum": [
+            "auto",
+            "off"
+          ],
           "default": "auto",
           "description": "'auto': learned. Brightness is averaged ONLY over samples where the light was on, so a light that is usually off no longer drags its learned value toward a brightness it never actually sits at. 'off': forced off for this scene - the almanac publishes 0, the scene automation turns it off, maintenance skips it. 'off' is set here, in this app's UI, and is permanent for the scene. Turning a light off in Home Assistant is a different thing entirely: that is a manual intervention, lasting until the next crossover, excluded from learning."
         }
       }
     },
-
     "scene_config": {
       "type": "object",
       "description": "Per-room, per-section settings. Learned values are not stored here.",
       "additionalProperties": false,
-      "required": ["groups"],
+      "required": [
+        "groups"
+      ],
       "properties": {
         "lux_target_seed": {
-          "type": ["number", "null"],
+          "type": [
+            "number",
+            "null"
+          ],
           "minimum": 0,
           "default": null,
           "description": "Optional manual seed for this section's lux target. null (the default) means OBSERVE: on the first crossover into this section the container averages three ambient readings over two minutes and writes the result into the provisional almanac. Superseded by the learned target as soon as the almanac reaches 'bootstrap' state. Maintenance does not run against a provisional target."
         },
         "lux_margin": {
-          "type": "number", "minimum": 0, "default": 5,
+          "type": "number",
+          "minimum": 0,
+          "default": 5,
           "description": "Deadband either side of target. Copied verbatim into the published almanac so HA-side templates keep their current shape."
         },
         "max_step_pct": {
-          "type": "number", "exclusiveMinimum": 0, "maximum": 1, "default": 0.04,
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "default": 0.04,
           "description": "Maximum single-nudge change as a fraction of current brightness, floored at 1 and capped at 10 by the maintenance template. Deliberately never reaches 0: maintenance can dim a light to 1 but only a user can turn one off."
         },
         "maintenance_enabled": {
@@ -303,52 +470,75 @@
           "description": "Whether Lux Maintenance runs in this section. Defaults false for 'night' and 'sleep', true elsewhere. Those two sections sit near the sensor's noise floor where lux readings are unusable, so brightness comes from the scene automation alone. Previously this happened by accident, because a margin of 5 around a target of 3 made every reading in-band; making it explicit means it no longer depends on that arithmetic holding."
         },
         "transition_seconds": {
-          "type": "integer", "minimum": 0, "default": 120,
+          "type": "integer",
+          "minimum": 0,
+          "default": 120,
           "description": "Crossover fade duration. The generated scene automation waits transition_seconds + 30 before releasing the room's guard boolean."
         },
         "groups": {
           "type": "object",
           "description": "Keyed by group id. Every group in the room must appear.",
-          "additionalProperties": { "$ref": "#/$defs/group_scene_config" }
+          "additionalProperties": {
+            "$ref": "#/$defs/group_scene_config"
+          }
         }
       }
     },
-
     "room": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "lux_sensors", "groups", "scenes"],
+      "required": [
+        "id",
+        "name",
+        "lux_sensors",
+        "groups",
+        "scenes"
+      ],
       "properties": {
         "id": {
           "$ref": "#/$defs/slug",
           "description": "Drives generated entity names: input_boolean.al_active_<id>, input_select.al_scene_<id>, sensor.al_almanac_<id>, and the CSV/almanac directory names."
         },
-        "name": { "type": "string", "minLength": 1 },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
         "enabled": {
-          "type": "boolean", "default": true,
+          "type": "boolean",
+          "default": true,
           "description": "Disabled rooms keep their config and history but are not scheduled, observed, or analysed."
         },
         "lux_sensors": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/entity_id" },
+          "items": {
+            "$ref": "#/$defs/entity_id"
+          },
           "description": "One or more illuminance sensors. Multiple sensors are averaged. Sensors reporting unknown/unavailable are excluded from that sample rather than counted as zero."
         },
         "presence_sensors": {
           "type": "array",
-          "items": { "$ref": "#/$defs/entity_id" },
+          "items": {
+            "$ref": "#/$defs/entity_id"
+          },
           "default": [],
           "description": "Optional. Occupancy is true if ANY listed sensor is on. An empty list means the room is treated as permanently occupied, so every heartbeat is eligible for learning."
         },
         "groups": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/group" }
+          "items": {
+            "$ref": "#/$defs/group"
+          }
         },
         "schedule_override": {
           "oneOf": [
-            { "type": "null" },
-            { "$ref": "#/$defs/schedule" }
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/schedule"
+            }
           ],
           "default": null,
           "description": "null inherits the global schedule. Set only when a room genuinely needs its own times - each override multiplies the generated scene automations by six."
@@ -356,14 +546,33 @@
         "scenes": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["sunrise", "day", "afternoon", "sunset", "night", "sleep"],
+          "required": [
+            "sunrise",
+            "day",
+            "afternoon",
+            "sunset",
+            "night",
+            "sleep"
+          ],
           "properties": {
-            "sunrise":   { "$ref": "#/$defs/scene_config" },
-            "day":       { "$ref": "#/$defs/scene_config" },
-            "afternoon": { "$ref": "#/$defs/scene_config" },
-            "sunset":    { "$ref": "#/$defs/scene_config" },
-            "night":     { "$ref": "#/$defs/scene_config" },
-            "sleep":     { "$ref": "#/$defs/scene_config" }
+            "sunrise": {
+              "$ref": "#/$defs/scene_config"
+            },
+            "day": {
+              "$ref": "#/$defs/scene_config"
+            },
+            "afternoon": {
+              "$ref": "#/$defs/scene_config"
+            },
+            "sunset": {
+              "$ref": "#/$defs/scene_config"
+            },
+            "night": {
+              "$ref": "#/$defs/scene_config"
+            },
+            "sleep": {
+              "$ref": "#/$defs/scene_config"
+            }
           }
         }
       }

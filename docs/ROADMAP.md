@@ -10,7 +10,8 @@
 | 5a | Scheduler: boundary computation and collapse | **done** — `app/scheduler.py` |
 | 5b-i | HA client (REST + WebSocket) and connection doctor | **done** — `app/ha.py`, `tools/doctor.py` |
 | 5b-ii | Storage layer: dual CSV/SQLite writes, event log, CSV re-ingest | **done** — `app/store.py` |
-| 5b-iii | Runtime: catch-up, observer, reactive detector, almanac push | next |
+| 5b-iii | Config loader: schema validation, defaults, cross-reference checks | **done** — `app/config.py` |
+| 5b-iv | Runtime: catch-up, observer, reactive detector, almanac push | next |
 | 6 | UI page 2 — configuration | |
 | 7 | UI page 1 — live analysis graph | |
 | 8 | UI page 3 — deploy and entity health check | |
