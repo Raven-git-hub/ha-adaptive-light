@@ -20,6 +20,11 @@
 
 ## Open items
 
+- **Verified running** against Home Assistant 2026.7.4 on 28 July 2026: connected,
+  computed the active section, logged heartbeats, and correctly reported the six
+  scene automations as not yet deployed.
+
+
 - **Coordinates.** The year sweep has been run against sample sites, not the
   real installation. Zero collapses are expected below ~45° latitude. Run
   `tools/doctor.py` to read the real coordinates from Home Assistant, then

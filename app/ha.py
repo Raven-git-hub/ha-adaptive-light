@@ -248,8 +248,18 @@ class HAWebSocket:
             self.last_seen = datetime.now(timezone.utc)
             log.info("connected to Home Assistant %s", self.ha_version)
 
-            await self._resubscribe()
-            await self._read_loop(ws)
+            # The reader must be running before any command is sent.
+            # Every command awaits its result message, and only the read
+            # loop can deliver one - subscribing first deadlocks until
+            # the timeout, drops the connection, and reconnects into the
+            # same trap, leaving the event stream permanently dead while
+            # the log cheerfully reports "connected".
+            reader = asyncio.create_task(self._read_loop(ws))
+            try:
+                await self._resubscribe()
+                await reader
+            finally:
+                reader.cancel()
 
     async def _resubscribe(self) -> None:
         wanted = set(self._subscriptions.values()) or set(self._handlers)

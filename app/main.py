@@ -223,4 +223,11 @@ async def api_deploy() -> dict:
                           state.runtime.ws, state.store)
     # Newly created automations need mapping before they can be fired.
     await state.runtime._map_automations()
+    if report.ok:
+        # Clear the fired marker so the scheduler applies the CURRENT
+        # section on its next tick. Without this the room stays dark
+        # until the next boundary, which after a 22:00 deploy means
+        # nothing visibly happens until 05:30.
+        for room_state in state.runtime.rooms.values():
+            room_state.fired_section = None
     return report.as_dict()

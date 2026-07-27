@@ -384,6 +384,7 @@ class Runtime:
                 f"Cannot start {section}: automation {aid} not found",
                 rs.room.id)
             rs.fired_section = section
+            rs.fired_at = now
             return
 
         await self.rest.trigger_automation(entity)
