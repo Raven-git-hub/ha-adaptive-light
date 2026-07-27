@@ -1,0 +1,22 @@
+# Runtime data - never commit. The CSV archive here is the only
+# irreplaceable artefact; back it up separately.
+/data/
+*.db
+*.db-wal
+*.db-shm
+
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

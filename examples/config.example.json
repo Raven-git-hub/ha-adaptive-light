@@ -1,0 +1,290 @@
+{
+  "version": 1,
+  "homeassistant": {
+    "base_url": "http://192.168.1.251:8123",
+    "access_token": "<redacted - stored in secrets, never written to this file>",
+    "verify_ssl": false
+  },
+  "system": {
+    "heartbeat_interval_minutes": 10,
+    "reactive_window_seconds": 120,
+    "reactive_min_delta": 5,
+    "reactive_suspends_maintenance": true,
+    "data_dir": "/data",
+    "csv_enabled": true,
+    "event_log_retention_days": 90
+  },
+  "schedule": {
+    "collision_policy": "collapse",
+    "min_section_minutes": 30,
+    "sections": [
+      {
+        "id": "sunrise",
+        "name": "Sunrise",
+        "priority": 100,
+        "trigger": {
+          "type": "earliest",
+          "of": [
+            {
+              "type": "sun",
+              "event": "sunrise",
+              "offset_minutes": 0
+            },
+            {
+              "type": "clock",
+              "time": "05:30"
+            }
+          ]
+        }
+      },
+      {
+        "id": "day",
+        "name": "Day",
+        "priority": 50,
+        "trigger": {
+          "type": "sun",
+          "event": "sunrise",
+          "offset_minutes": 180
+        }
+      },
+      {
+        "id": "afternoon",
+        "name": "Afternoon",
+        "priority": 50,
+        "trigger": {
+          "type": "sun",
+          "event": "sunset",
+          "offset_minutes": -180
+        }
+      },
+      {
+        "id": "sunset",
+        "name": "Sunset",
+        "priority": 50,
+        "trigger": {
+          "type": "sun",
+          "event": "sunset",
+          "offset_minutes": 0
+        }
+      },
+      {
+        "id": "night",
+        "name": "Night",
+        "priority": 100,
+        "trigger": {
+          "type": "clock",
+          "time": "20:30"
+        }
+      },
+      {
+        "id": "sleep",
+        "name": "Sleep",
+        "priority": 100,
+        "trigger": {
+          "type": "clock",
+          "time": "22:00"
+        }
+      }
+    ]
+  },
+  "learning": {
+    "lookback_days": 21,
+    "publish_delay_days": 2,
+    "bootstrap_min_days": 7,
+    "reactive_weight": 5,
+    "post_reactive_boost": [
+      3,
+      2,
+      1.5
+    ],
+    "recency_weights": [
+      {
+        "max_age_days": 3,
+        "weight": 3
+      },
+      {
+        "max_age_days": 7,
+        "weight": 2
+      },
+      {
+        "max_age_days": 14,
+        "weight": 1
+      },
+      {
+        "max_age_days": null,
+        "weight": 0.5
+      }
+    ],
+    "confidence": {
+      "high_weight_threshold": 30,
+      "medium_weight_threshold": 10,
+      "high_multiplier": 1.5,
+      "medium_multiplier": 1.0,
+      "low_multiplier": 0.5
+    }
+  },
+  "rooms": [
+    {
+      "id": "main_room",
+      "name": "Main Room",
+      "enabled": true,
+      "lux_sensors": [
+        "sensor.light_sensor_main_room_illuminance"
+      ],
+      "presence_sensors": [
+        "binary_sensor.presence_detector_main_room"
+      ],
+      "groups": [
+        {
+          "id": "tv_light",
+          "name": "TV Light",
+          "entity_id": "light.tv_light"
+        },
+        {
+          "id": "play_area",
+          "name": "Play Area",
+          "entity_id": "light.play_area"
+        },
+        {
+          "id": "dining_area",
+          "name": "Dining Area",
+          "entity_id": "light.dining_area"
+        },
+        {
+          "id": "bar_lights",
+          "name": "Bar Lights",
+          "entity_id": "light.bar_lights"
+        }
+      ],
+      "schedule_override": null,
+      "scenes": {
+        "sunrise": {
+          "lux_target_seed": null,
+          "lux_margin": 5,
+          "max_step_pct": 0.04,
+          "maintenance_enabled": true,
+          "transition_seconds": 120,
+          "groups": {
+            "tv_light": {
+              "mode": "auto"
+            },
+            "play_area": {
+              "mode": "auto"
+            },
+            "dining_area": {
+              "mode": "auto"
+            },
+            "bar_lights": {
+              "mode": "auto"
+            }
+          }
+        },
+        "day": {
+          "lux_target_seed": null,
+          "lux_margin": 5,
+          "max_step_pct": 0.04,
+          "maintenance_enabled": true,
+          "transition_seconds": 120,
+          "groups": {
+            "tv_light": {
+              "mode": "off"
+            },
+            "play_area": {
+              "mode": "auto"
+            },
+            "dining_area": {
+              "mode": "auto"
+            },
+            "bar_lights": {
+              "mode": "auto"
+            }
+          }
+        },
+        "afternoon": {
+          "lux_target_seed": null,
+          "lux_margin": 5,
+          "max_step_pct": 0.04,
+          "maintenance_enabled": true,
+          "transition_seconds": 120,
+          "groups": {
+            "tv_light": {
+              "mode": "auto"
+            },
+            "play_area": {
+              "mode": "auto"
+            },
+            "dining_area": {
+              "mode": "auto"
+            },
+            "bar_lights": {
+              "mode": "auto"
+            }
+          }
+        },
+        "sunset": {
+          "lux_target_seed": null,
+          "lux_margin": 5,
+          "max_step_pct": 0.04,
+          "maintenance_enabled": true,
+          "transition_seconds": 120,
+          "groups": {
+            "tv_light": {
+              "mode": "auto"
+            },
+            "play_area": {
+              "mode": "auto"
+            },
+            "dining_area": {
+              "mode": "auto"
+            },
+            "bar_lights": {
+              "mode": "auto"
+            }
+          }
+        },
+        "night": {
+          "lux_target_seed": null,
+          "lux_margin": 5,
+          "max_step_pct": 0.04,
+          "maintenance_enabled": false,
+          "transition_seconds": 120,
+          "groups": {
+            "tv_light": {
+              "mode": "auto"
+            },
+            "play_area": {
+              "mode": "auto"
+            },
+            "dining_area": {
+              "mode": "auto"
+            },
+            "bar_lights": {
+              "mode": "auto"
+            }
+          }
+        },
+        "sleep": {
+          "lux_target_seed": null,
+          "lux_margin": 5,
+          "max_step_pct": 0.04,
+          "maintenance_enabled": false,
+          "transition_seconds": 120,
+          "groups": {
+            "tv_light": {
+              "mode": "auto"
+            },
+            "play_area": {
+              "mode": "auto"
+            },
+            "dining_area": {
+              "mode": "auto"
+            },
+            "bar_lights": {
+              "mode": "auto"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
