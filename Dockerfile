@@ -10,6 +10,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ ./app/
+# Read at runtime, not just at build: main.py loads the SQLite DDL and
+# validates config against the JSON Schema on every start.
+COPY schema/ ./schema/
 
 # Runs unprivileged. Create ./data on the host owned by this uid, or
 # the first write will fail:  mkdir -p data && sudo chown 10001 data

@@ -1,0 +1,19 @@
+# The venv is often created inside the repo; it must never enter the
+# build context - it is large, and it is the wrong platform's binaries.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Runtime data and secrets
+data/
+*.db
+*.db-wal
+*.db-shm
+.env
+
+.git/
+.gitignore
+docs/
+examples/
+tools/
