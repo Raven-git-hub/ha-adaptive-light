@@ -7,6 +7,7 @@ observer and analyser are attached.
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -25,7 +26,20 @@ class Status:
 
 
 status = Status()
-app = FastAPI(title="Adaptive Light", version="0.1.0")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup. Phase 5b attaches: HA websocket client, scheduler with
+    # catch-up, heartbeat observer, reactive detector, nightly analysis,
+    # almanac push.
+    os.makedirs(os.environ.get("AL_DATA_DIR", "/data"), exist_ok=True)
+    yield
+    # Shutdown. The websocket must be closed deliberately rather than
+    # dropped, so Home Assistant does not hold a dead subscription.
+
+
+app = FastAPI(title="Adaptive Light", version="0.1.0", lifespan=lifespan)
 
 
 @app.get("/healthz")
@@ -55,10 +69,3 @@ def api_status() -> dict:
         "last_analysis": status.last_analysis.isoformat() if status.last_analysis else None,
         "rooms": status.rooms,
     }
-
-
-@app.on_event("startup")
-async def startup() -> None:
-    os.makedirs(os.environ.get("AL_DATA_DIR", "/data"), exist_ok=True)
-    # Phase 5b attaches: HA websocket client, scheduler with catch-up,
-    # heartbeat observer, reactive detector, nightly analysis, almanac push.

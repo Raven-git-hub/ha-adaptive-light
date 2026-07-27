@@ -55,7 +55,7 @@ clamping cannot fix, since shifting the sunset scene later still leaves it
 running after the night scene. Order inversions always collapse.
 
 Measured over 2026: zero collapses at equatorial and Perth latitudes, 131 at
-London, 508 at Tromsø. This only bites above roughly 45°.
+London, 529 at Tromsø. This only bites above roughly 45°.
 
 ---
 
