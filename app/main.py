@@ -11,7 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.config import Config, ConfigError, blank, load, loads, save
 from app.deploy import check as deploy_check
@@ -241,3 +242,94 @@ async def api_deploy() -> dict:
         for room_state in state.runtime.rooms.values():
             room_state.fired_section = None
     return report.as_dict()
+
+
+# ---------------------------------------------------------------------
+# Entity discovery - backs the config pickers
+# ---------------------------------------------------------------------
+
+@app.get("/api/entities")
+async def api_entities() -> dict:
+    """Lights, illuminance sensors and presence sensors, from Home
+    Assistant itself.
+
+    Pickers rather than free text: a typo'd entity id does not error in
+    Home Assistant, it silently resolves to unknown forever. Choosing
+    from a list makes that class of failure impossible.
+    """
+    if not state.runtime:
+        raise HTTPException(status_code=409, detail="not connected to Home Assistant")
+
+    lights, lux, presence = [], [], []
+    for s in await state.runtime.rest.states():
+        entity = s["entity_id"]
+        attrs = s.get("attributes", {})
+        item = {"entity_id": entity,
+                "name": attrs.get("friendly_name") or entity}
+        if entity.startswith("light."):
+            lights.append(item)
+        elif attrs.get("device_class") == "illuminance":
+            lux.append(item)
+        elif attrs.get("device_class") in ("occupancy", "motion", "presence"):
+            presence.append(item)
+
+    key = lambda i: i["name"].lower()
+    return {"lights": sorted(lights, key=key),
+            "illuminance": sorted(lux, key=key),
+            "presence": sorted(presence, key=key)}
+
+
+@app.get("/api/schedule/preview")
+def api_schedule_preview(room_id: str | None = None, days: int = 365) -> dict:
+    """Today's computed boundaries, plus a year-ahead collision scan.
+
+    Section collisions are seasonal - a schedule that behaves perfectly
+    in July can silently lose a section in December. Showing the year
+    means a collision is something you see coming rather than discover.
+    """
+    from collections import Counter
+    from datetime import date as _date
+    from datetime import timedelta as _td
+
+    from app.scheduler import compute_day
+
+    if not state.runtime or not state.runtime.sun:
+        raise HTTPException(status_code=409, detail="not connected to Home Assistant")
+
+    room = (state.config.room(room_id) if room_id and state.config
+            else (state.config.active_rooms[0] if state.config
+                  and state.config.active_rooms else None))
+    schedule = room.schedule if room else state.config.schedule
+    tz = state.runtime.tz
+    today = datetime.now(tz).date()
+
+    boundaries = [
+        {"section": b.section, "name": b.name,
+         "at": b.planned.strftime("%H:%M") if b.planned else None,
+         "ends": b.ends.strftime("%H:%M") if b.ends else None,
+         "outcome": b.outcome, "reason": b.reason}
+        for b in compute_day(schedule, state.runtime.sun, today, tz)
+    ]
+
+    collisions: Counter = Counter()
+    for offset in range(days):
+        for b in compute_day(schedule, state.runtime.sun,
+                             today + _td(days=offset), tz):
+            if not b.ran:
+                collisions[b.section] += 1
+
+    return {"date": today.isoformat(), "boundaries": boundaries,
+            "collisions": dict(collisions), "days_scanned": days}
+
+
+# ---------------------------------------------------------------------
+# Static UI
+# ---------------------------------------------------------------------
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+    @app.get("/")
+    def index() -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html")

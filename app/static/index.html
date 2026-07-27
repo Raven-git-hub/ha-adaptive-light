@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adaptive Light</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='10' fill='%23f0b429'/></svg>">
+</head>
+<body>
+
+<header class="strip">
+  <div class="brand">
+    <span class="dot" id="conn-dot"></span>
+    Adaptive Light
+  </div>
+
+  <div class="stat">
+    <span class="k">Home Assistant</span>
+    <span class="v" id="s-ha">&mdash;</span>
+  </div>
+  <div class="stat">
+    <span class="k">Section</span>
+    <span class="v" id="s-section">&mdash;</span>
+  </div>
+  <div class="stat">
+    <span class="k">Last heartbeat</span>
+    <span class="v" id="s-heartbeat">&mdash;</span>
+  </div>
+  <div class="stat">
+    <span class="k">Heartbeats today</span>
+    <span class="v" id="s-count">&mdash;</span>
+  </div>
+  <div class="stat">
+    <span class="k">Events seen</span>
+    <span class="v" id="s-events">&mdash;</span>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-view="now">Now</button>
+  <button data-view="analysis">Analysis</button>
+  <button data-view="almanac">Almanac</button>
+  <button data-view="config" class="active">Config</button>
+  <button data-view="log">Log</button>
+</nav>
+
+<main id="view"></main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
