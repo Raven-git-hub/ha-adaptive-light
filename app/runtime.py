@@ -85,6 +85,7 @@ class RoomState:
     boundaries_for: date | None = None
     window: ReactiveWindow | None = None
     last_states: dict[str, tuple[bool, int | None]] = field(default_factory=dict)
+    last_heartbeat: datetime | None = None
     seeded_sections: set[str] = field(default_factory=set)
 
 
@@ -111,6 +112,11 @@ class Runtime:
         self.automation_entities: dict[str, str] = {}   # automation id -> entity_id
         self._tasks: list[asyncio.Task] = []
         self._stopping = False
+        # Counts every state_changed delivered, matched or not: without
+        # it there is no way to distinguish "the stream is dead" from
+        # "nothing has happened in this room yet".
+        self.events_seen = 0
+        self.last_event_at: datetime | None = None
 
     # -- lifecycle ----------------------------------------------------
 
@@ -224,6 +230,8 @@ class Runtime:
     # -- events -------------------------------------------------------
 
     def _on_state_changed(self, event: dict) -> None:
+        self.events_seen += 1
+        self.last_event_at = datetime.now(self.tz) if self.tz else None
         data = event.get("data", {})
         entity = data.get("entity_id", "")
         new = data.get("new_state")
@@ -501,6 +509,15 @@ class Runtime:
         self.store.record_heartbeat(
             rs.room.id, now, rs.fired_section or "unknown", lux, sensor_count,
             occupied, groups, rs.room.group_ids, int(waited * 1000))
+        rs.last_heartbeat = now
+        # Debug severity: 144 a day would drown the log at info, but
+        # they must be visible when something looks wrong.
+        self.store.log_event(
+            "debug", "heartbeat",
+            f"{rs.fired_section or 'unknown'}: {lux} lux, "
+            f"{sum(1 for g in groups.values() if g.is_on)}/{len(groups)} groups on"
+            + (f", deferred {waited:.0f}s" if waited else ""),
+            rs.room.id)
 
     # -- sensors ------------------------------------------------------
 

@@ -502,6 +502,19 @@ class Store:
                 total_skip += b
         return (total_in, total_skip)
 
+    def activity(self, room_id: str, local_date: str) -> dict[str, Any]:
+        """Counts and last-seen times for the status view, so 'is it
+        actually working' is answerable without opening a CSV."""
+        with self._lock:
+            hb = self._conn.execute(
+                "SELECT COUNT(*), MAX(ts) FROM heartbeat WHERE room_id=? AND local_date=?",
+                (room_id, local_date)).fetchone()
+            rx = self._conn.execute(
+                "SELECT COUNT(*), MAX(ts) FROM reactive WHERE room_id=? AND local_date=?",
+                (room_id, local_date)).fetchone()
+        return {"heartbeats_today": hb[0], "last_heartbeat": hb[1],
+                "reactive_today": rx[0], "last_reactive": rx[1]}
+
     @property
     def connection(self) -> sqlite3.Connection:
         """For the analyser, which reads directly."""

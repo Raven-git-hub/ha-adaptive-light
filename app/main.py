@@ -104,10 +104,12 @@ def healthz() -> JSONResponse:
 
 @app.get("/api/status")
 def api_status() -> dict:
+    from datetime import date as _date
+    today = _date.today().isoformat()
     rooms = {}
     if state.runtime:
         for room_id, rs in state.runtime.rooms.items():
-            rooms[room_id] = {
+            entry = {
                 "name": rs.room.name,
                 "section": rs.fired_section,
                 "since": rs.fired_at.isoformat() if rs.fired_at else None,
@@ -115,9 +117,17 @@ def api_status() -> dict:
                 "hold": rs.hold_on,
                 "groups": len(rs.room.groups),
             }
+            if state.store:
+                entry.update(state.store.activity(room_id, today))
+            rooms[room_id] = entry
     return {
         "ha_connected": bool(state.runtime and state.runtime.ws.connected),
         "ha_version": state.runtime.ws.ha_version if state.runtime else None,
+        # Rising while nothing else happens is the proof that the
+        # subscription is live rather than silently dead.
+        "events_seen": state.runtime.events_seen if state.runtime else 0,
+        "last_event_at": (state.runtime.last_event_at.isoformat()
+                          if state.runtime and state.runtime.last_event_at else None),
         "error": state.error,
         "rooms": rooms,
     }
