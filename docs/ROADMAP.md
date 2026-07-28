@@ -17,32 +17,50 @@
 | 7a | UI — Now (live dashboard) | **done** — `/api/now`, Now view |
 | 7b | UI — Analysis (day chart, uPlot) | **done** — `/api/analysis`, Analysis view, vendored uPlot |
 | 8 | Time profiles: shared schedules, per-room selection, trigger editor | **done** |
-| 9 | UI — Almanac, with the auto/off control | next |
-| 8 | UI — Almanac, with the auto/off control | |
-| 9 | Home Assistant add-on packaging | |
+| 9 | UI — Almanac, with the auto/off control and a rebuild button | next |
+| 10 | Home Assistant add-on packaging | planned |
+
+## Deployed
+
+Cut over to the containerised system on 28 July 2026, running against Home
+Assistant 2026.7.4. The n8n prototype and its automations were removed. The
+container schedules crossovers, observes via heartbeats, detects manual
+adjustments, and maintains lux against the learned target; the Now, Analysis,
+Config and Log views are in use.
+
+Issues found and fixed during and after cutover:
+
+- WebSocket reconnect loop that left the event stream dead while the log
+  reported "connected" — the read loop must start before any subscription.
+- Reactive detection now ignores automation-caused changes (via the guard
+  boolean, `context.parent_id`, and configurable `external_guards`), so a
+  coexisting system's nudges are not learned as user interventions.
+- Off-mode groups are baked into the scene automation directly, so an explicit
+  "off" holds from first deploy instead of waiting on an almanac to exist.
+- Section runs are closed when the next fires, so Analysis target bands stop at
+  the real boundary; band drawing is clamped to the plot area.
+
+## Future ideas
+
+- **Presence Rules.** Configurable actions when no presence is detected in a
+  section — dimming or turning off after a period unoccupied, restoring the
+  scene when presence returns — set per section. A collapsed **Presence rules**
+  slot is already reserved per room in the Config UI.
+- **Custom Time Sections.** Let a profile add or remove sections rather than
+  being fixed at the canonical six (e.g. a baby-room nap window, a focus block,
+  a dinner or wind-down section). The larger change: the analyser, generator
+  and almanac currently assume the six-section vocabulary and would need to
+  work from the profile's section list instead.
 
 ## Open items
 
-- **Verified running** against Home Assistant 2026.7.4 on 28 July 2026: connected,
-  computed the active section, logged heartbeats, and correctly reported the six
-  scene automations as not yet deployed.
-
-
-- **Coordinates.** The year sweep has been run against sample sites, not the
-  real installation. Zero collapses are expected below ~45° latitude. Run
-  `tools/doctor.py` to read the real coordinates from Home Assistant, then
-  `AL_CONFIG=... python tools/sweep.py` with them.
-- **Template native types.** Answered by `tools/doctor.py`. The maintenance automation assigns
-  `state_attr()` to a variable and subscripts it. Recent Home Assistant
-  renders template variables to native Python types, but this is unverified
-  on hardware. If it returns a string, `alm.get('lux_target')` fails silently
-  and maintenance never nudges. Check in Developer Tools → Template:
-  ```jinja
-  {% set alm = state_attr('sensor.al_almanac_main_room', 'day') %}
-  {{ alm is mapping }} / {{ alm.get('lux_target') }}
-  ```
-- **Helper creation over WebSocket.** Answered by `tools/doctor.py`. Creating helpers via
-  `input_boolean/create` and friends is the frontend's own path, not a
-  documented public API. Needs an hour's spike. If it fails, the fallback is
-  generated YAML and a copy-paste step — the generator's output is identical
-  either way.
+- **Coordinates.** The year sweep has been validated against the real
+  installation via `tools/doctor.py`; zero collapses at Hong Kong latitude,
+  as expected below ~45°.
+- **Scheduler `ReadTimeout` noise.** A routine retry when Home Assistant is
+  briefly slow logs a full stack trace at error level. Cosmetic; worth
+  quietening so a transient blip does not look alarming.
+- **Static-file cache busting.** UI updates currently need a hard refresh; a
+  version query string on the script tags would remove that.
+- **`external_guards`.** Added for coexistence with the prototype during
+  cutover; now dead weight, harmless, removable.
