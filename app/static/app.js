@@ -1001,6 +1001,209 @@ function drawChart(host, data) {
   }
 }
 
+
+/* ------------------------------------------------------------------
+   Almanac
+   ------------------------------------------------------------------ */
+
+let almanacCharts = [];
+
+function destroyAlmanacCharts() {
+  for (const c of almanacCharts) { try { c.destroy(); } catch {} }
+  almanacCharts = [];
+}
+
+async function renderAlmanac() {
+  destroyAlmanacCharts();
+  const view = $("#view");
+  const rooms = Object.keys(status.rooms || {});
+  if (!rooms.length) {
+    view.replaceChildren(el("div", { className: "empty" }, "No rooms configured yet."));
+    return;
+  }
+  view.replaceChildren();
+
+  for (const roomId of rooms) {
+    let almanac, history;
+    try {
+      [almanac, history] = await Promise.all([
+        api("/api/almanac/" + roomId),
+        api(`/api/almanac/${roomId}/history`).catch(() => null),
+      ]);
+    } catch {
+      continue;
+    }
+    view.append(almanacCard(roomId, status.rooms[roomId]?.name || roomId,
+                            almanac, history));
+  }
+}
+
+function almanacCard(roomId, name, almanac, history) {
+  const meta = almanac?._meta || {};
+  const card = el("div", { className: "card almanac-room" });
+
+  card.append(el("div", { className: "almanac-meta" },
+    el("h2", { style: "margin:0" }, name),
+    el("span", { className: `badge ${meta.mode || "provisional"}` },
+       meta.mode || "no data"),
+    el("span", { className: "muted" },
+       meta.days_analysed != null ? `${meta.days_analysed} day(s) analysed` : ""),
+    meta.valid_from ? el("span", { className: "faint" }, `valid from ${meta.valid_from}`) : null,
+    el("button", { className: "btn sm right", textContent: "Rebuild now",
+                   onclick: () => rebuildAlmanac(roomId) })));
+
+  // sections present in the almanac (skip _meta)
+  const sections = SECTIONS.filter(s => almanac && almanac[s] && typeof almanac[s] === "object");
+  if (!sections.length) {
+    card.append(el("div", { className: "empty" },
+      "No almanac yet. It builds from the nightly analysis at 00:15 once there " +
+      "are occupied heartbeats to learn from."));
+    return card;
+  }
+
+  // group ids from the first section entry
+  const groupIds = Object.keys(almanac[sections[0]].on_fraction || {});
+  const split = el("div", { className: "almanac-split" });
+
+  // -- left: matrix --------------------------------------------------
+  const left = el("div", {});
+  const head = el("tr", {}, el("th", {}, "Section"),
+    ...groupIds.map(g => el("th", {}, cfg?.rooms?.find(r => r.id === roomId)
+      ?.groups?.find(gr => gr.id === g)?.name || g)));
+  const body = el("tbody");
+
+  for (const sec of sections) {
+    const e = almanac[sec];
+    const conf = e.high_confidence_days > 2 ? "high"
+               : (e.days_contributing > 1 ? "medium" : "low");
+    const tr = el("tr", {},
+      el("td", { className: "sechead" },
+        el("div", {}, sec),
+        el("div", { className: "lux" },
+           e.lux_target != null ? `${e.lux_target} \u00b1${e.lux_margin}` : "\u2014"),
+        el("div", { className: "sub" },
+           `${e.days_contributing}d` +
+           (e.maintenance_enabled ? "" : " \u00b7 maint off"))));
+
+    for (const g of groupIds) {
+      const val = e[g];
+      const frac = (e.on_fraction || {})[g];
+      const cell = el("td", { className: `cell conf-${conf}` });
+      const briClass = val === 0 ? "bri off" : val == null ? "bri none" : "bri";
+      cell.append(el("div", { className: briClass },
+        val === 0 ? "off" : val == null ? "\u2014" : String(val)));
+      if (frac != null) {
+        cell.append(el("div", { className: "onfrac",
+          title: `on ${Math.round(frac * 100)}% of samples` },
+          el("div", { className: "fill", style: `width:${Math.round(frac * 100)}%` })));
+      }
+      // auto/off toggle, writing straight into cfg so Save persists it
+      const roomCfg = cfg?.rooms?.find(r => r.id === roomId);
+      if (roomCfg) {
+        const sceneG = roomCfg.scenes?.[sec]?.groups?.[g];
+        if (sceneG) {
+          const tg = el("div", { className: "toggle" });
+          const mk = (mode, label) => {
+            const b = el("button", { textContent: label });
+            b.className = sceneG.mode === mode
+              ? "on" + (mode === "off" ? " off-state" : "") : "";
+            b.onclick = async () => {
+              sceneG.mode = mode;
+              await saveConfig();
+              renderAlmanac();
+            };
+            return b;
+          };
+          tg.append(mk("auto", "Auto"), mk("off", "Off"));
+          cell.append(tg);
+        }
+      }
+      tr.append(cell);
+    }
+    body.append(tr);
+  }
+  left.append(el("table", { className: "almanac" }, el("thead", {}, head), body));
+  split.append(left);
+
+  // -- right: trend charts ------------------------------------------
+  const right = el("div", {});
+  if (!history || !history.snapshots) {
+    right.append(el("div", { className: "trend-empty" },
+      "Trends appear once a few nightly analyses have accumulated. " +
+      "Right now there is a single snapshot \u2014 nothing to trend yet."));
+  } else {
+    right.append(el("p", { className: "hint", style: "margin:0 0 8px" },
+      `Target and trust over the last ${history.snapshots} snapshot(s). ` +
+      `Trust rises with recent, confident, consistent data; the dashed lines ` +
+      `are the medium and high thresholds.`));
+    for (const sec of sections) {
+      const sd = history.sections[sec];
+      const holder = el("div", { className: "trend-section" });
+      holder.append(el("div", { className: "thead" },
+        el("span", { className: "nm" }, sec),
+        el("span", { className: "now" },
+           sd ? `${sd.trust_weight.at(-1)} trust` : "")));
+      const chart = el("div", { className: "trend-chart" });
+      holder.append(chart);
+      right.append(holder);
+      if (sd && sd.generated_at.length > 1) {
+        queueMicrotask(() => drawTrend(chart, sd, history.thresholds));
+      } else {
+        chart.replaceChildren(el("div", { className: "trend-empty" },
+          "one point so far"));
+      }
+    }
+  }
+  split.append(right);
+
+  card.append(split);
+  return card;
+}
+
+function drawTrend(host, sd, thresholds) {
+  const xs = sd.generated_at.map(t => Math.floor(new Date(t).getTime() / 1000));
+  const opts = {
+    width: host.clientWidth || 420, height: 90,
+    scales: { x: { time: true }, lux: {}, trust: {} },
+    axes: [
+      { stroke: "#5a6274", size: 24, grid: { stroke: "#272c3833" } },
+      { scale: "lux", stroke: "#8b93a7", size: 34, grid: { stroke: "#272c3822" } },
+      { scale: "trust", side: 1, stroke: "#f0b429", size: 30, grid: { show: false } },
+    ],
+    series: [
+      {},
+      { label: "lux", scale: "lux", stroke: "#e6e9f0", width: 2, points: { show: true, size: 4 } },
+      { label: "trust", scale: "trust", stroke: "#f0b429", width: 1.5,
+        points: { show: false }, dash: [] },
+    ],
+    hooks: { draw: [(u) => {
+      // threshold reference lines on the trust scale
+      const ctx = u.ctx; ctx.save();
+      ctx.setLineDash([3, 3]); ctx.strokeStyle = "rgba(240,180,41,0.3)";
+      for (const key of ["medium", "high"]) {
+        const y = u.valToPos(thresholds[key], "trust", true);
+        ctx.beginPath(); ctx.moveTo(u.bbox.left, y);
+        ctx.lineTo(u.bbox.left + u.bbox.width, y); ctx.stroke();
+      }
+      ctx.restore();
+    }] },
+    legend: { show: false },
+    cursor: { show: true },
+  };
+  const data = [xs, sd.lux_target, sd.trust_weight];
+  almanacCharts.push(new uPlot(opts, data, host));
+}
+
+async function rebuildAlmanac(roomId) {
+  try {
+    await api("/api/analysis/run", { method: "POST" });
+    toast("Almanac rebuilt");
+    renderAlmanac();
+  } catch (e) {
+    toast(e.status === 409 ? "Not connected to Home Assistant" : "Rebuild failed", "err");
+  }
+}
+
 /* ------------------------------------------------------------------
    Routing
    ------------------------------------------------------------------ */
@@ -1010,8 +1213,7 @@ const VIEWS = {
   log: renderLog,
   now: renderNow,
   analysis: renderAnalysis,
-  almanac: () => stub("Almanac", "The learned model: sections down, groups across, " +
-                                 "with on-fraction and confidence."),
+  almanac: renderAlmanac,
 };
 
 function stub(title, description) {
@@ -1023,6 +1225,7 @@ function stub(title, description) {
 function go(name) {
   if (nowTimer && name !== "now") { clearInterval(nowTimer); nowTimer = null; }
   if (analysisChart && name !== "analysis") { analysisChart.destroy(); analysisChart = null; }
+  if (name !== "almanac") destroyAlmanacCharts();
   for (const b of $("#tabs").children) b.classList.toggle("active", b.dataset.view === name);
   location.hash = name;
   (VIEWS[name] || VIEWS.config)();

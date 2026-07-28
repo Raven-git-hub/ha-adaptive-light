@@ -68,6 +68,21 @@ class Store:
             log.info("initialised database at %s", self.db_path)
         else:
             self._conn.execute("PRAGMA foreign_keys = ON")
+            self._migrate()
+
+    def _migrate(self) -> None:
+        """Additive, idempotent migrations for databases created before a
+        column existed. Each guard checks the live schema, so running this
+        on an already-migrated database is a no-op."""
+        with self._lock:
+            cols = {r[1] for r in self._conn.execute(
+                "PRAGMA table_info(almanac_scene)")}
+            if "trust_weight" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE almanac_scene ADD COLUMN "
+                    "trust_weight REAL NOT NULL DEFAULT 0")
+                log.info("migrated: added almanac_scene.trust_weight")
+            self._conn.commit()
 
     def close(self) -> None:
         with self._lock:
@@ -348,18 +363,20 @@ class Store:
                 self._conn.execute(
                     "INSERT OR REPLACE INTO almanac_scene(almanac_id,section,"
                     "lux_target,lux_margin,max_step_pct,maintenance_enabled,"
-                    "days_contributing,high_confidence_days) VALUES(?,?,?,?,?,?,?,?)",
+                    "days_contributing,high_confidence_days,trust_weight)"
+                    " VALUES(?,?,?,?,?,?,?,?,?)",
                     (almanac_id, section, entry.get("lux_target"),
                      entry.get("lux_margin", 5), entry.get("max_step_pct", 0.04),
                      int(entry.get("maintenance_enabled", True)),
                      entry.get("days_contributing", 0),
-                     entry.get("high_confidence_days", 0)),
+                     entry.get("high_confidence_days", 0),
+                     entry.get("trust_weight", 0)),
                 )
                 fractions = entry.get("on_fraction", {})
                 for key, value in entry.items():
                     if key in ("lux_target", "lux_margin", "max_step_pct",
                                "maintenance_enabled", "days_contributing",
-                               "high_confidence_days", "on_fraction"):
+                               "high_confidence_days", "trust_weight", "on_fraction"):
                         continue
                     self._conn.execute(
                         "INSERT OR REPLACE INTO almanac_group(almanac_id,section,"

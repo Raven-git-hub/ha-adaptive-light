@@ -162,6 +162,7 @@ CREATE TABLE almanac_scene (
     maintenance_enabled   INTEGER NOT NULL,
     days_contributing     INTEGER NOT NULL DEFAULT 0,
     high_confidence_days  INTEGER NOT NULL DEFAULT 0,
+    trust_weight          REAL    NOT NULL DEFAULT 0,   -- accumulated effective weight
     PRIMARY KEY (almanac_id, section)
 );
 

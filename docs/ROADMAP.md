@@ -17,8 +17,8 @@
 | 7a | UI — Now (live dashboard) | **done** — `/api/now`, Now view |
 | 7b | UI — Analysis (day chart, uPlot) | **done** — `/api/analysis`, Analysis view, vendored uPlot |
 | 8 | Time profiles: shared schedules, per-room selection, trigger editor | **done** |
-| 9 | UI — Almanac, with the auto/off control and a rebuild button | next |
-| 10 | Home Assistant add-on packaging | planned |
+| 9 | UI — Almanac: matrix, on_fraction, auto/off, trend charts | **done** |
+| 10 | Home Assistant add-on packaging | next |
 
 ## Deployed
 

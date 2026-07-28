@@ -388,7 +388,7 @@ def build_almanac(
             "g_weight": {g: 0.0 for g in group_ids},
             "on_sum": {g: 0.0 for g in group_ids},
             "on_weight": {g: 0.0 for g in group_ids},
-            "days": 0, "high_days": 0,
+            "days": 0, "high_days": 0, "trust": 0.0,
         }
         for s in SECTIONS
     }
@@ -420,6 +420,7 @@ def build_almanac(
                     a["on_weight"][g] += combined
 
             a["days"] += 1
+            a["trust"] += combined
             if stats.confidence == "high":
                 a["high_days"] += 1
 
@@ -454,6 +455,11 @@ def build_almanac(
             ),
             "days_contributing": a["days"],
             "high_confidence_days": a["high_days"],
+            # Accumulated effective weight behind this section: recency x
+            # confidence x per-day settled weight, summed over the window.
+            # Surfaced so the UI can show trust approaching its thresholds
+            # smoothly, rather than only the bucketed low/medium/high.
+            "trust_weight": round(a["trust"], 1),
             "on_fraction": {},
         }
 

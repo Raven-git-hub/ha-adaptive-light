@@ -513,6 +513,59 @@ def api_analysis(room_id: str, date: str | None = None) -> dict:
 
 
 # ---------------------------------------------------------------------
+# Almanac history - feeds the trend charts
+# ---------------------------------------------------------------------
+
+@app.get("/api/almanac/{room_id}/history")
+def api_almanac_history(room_id: str, section: str | None = None) -> dict:
+    """Every stored almanac snapshot for a room, oldest first.
+
+    Each nightly analysis inserts a new almanac row rather than updating,
+    so the history is already there - this just reads it back, shaped for
+    per-section trend lines: lux_target, days_contributing and
+    trust_weight over time.
+    """
+    if not state.store:
+        raise HTTPException(status_code=503, detail="store unavailable")
+
+    conn = state.store.connection
+    rows = conn.execute(
+        "SELECT a.id, a.generated_at, a.valid_from, a.mode, a.days_analysed, "
+        "s.section, s.lux_target, s.lux_margin, s.days_contributing, "
+        "s.high_confidence_days, s.trust_weight "
+        "FROM almanac a JOIN almanac_scene s ON s.almanac_id = a.id "
+        "WHERE a.room_id = ? " + ("AND s.section = ? " if section else "") +
+        "ORDER BY a.generated_at ASC, s.section",
+        (room_id, section) if section else (room_id,)).fetchall()
+
+    # Group by section into parallel arrays the chart can consume directly.
+    sections: dict[str, dict] = {}
+    for r in rows:
+        sec = sections.setdefault(r["section"], {
+            "generated_at": [], "lux_target": [], "days_contributing": [],
+            "trust_weight": [], "mode": [],
+        })
+        sec["generated_at"].append(r["generated_at"])
+        sec["lux_target"].append(r["lux_target"])
+        sec["days_contributing"].append(r["days_contributing"])
+        sec["trust_weight"].append(r["trust_weight"])
+        sec["mode"].append(r["mode"])
+
+    # The confidence thresholds, so the trend can draw them as reference
+    # lines without hardcoding them in the UI.
+    from app.analyser import LearningConfig
+    lc = LearningConfig()
+    return {
+        "room_id": room_id,
+        "snapshots": conn.execute(
+            "SELECT COUNT(*) FROM almanac WHERE room_id=?", (room_id,)).fetchone()[0],
+        "sections": sections,
+        "thresholds": {"medium": lc.medium_weight_threshold,
+                       "high": lc.high_weight_threshold},
+    }
+
+
+# ---------------------------------------------------------------------
 # Static UI
 # ---------------------------------------------------------------------
 
