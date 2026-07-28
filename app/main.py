@@ -279,16 +279,17 @@ async def api_entities() -> dict:
             "presence": sorted(presence, key=key)}
 
 
-@app.get("/api/schedule/preview")
-def api_schedule_preview(room_id: str | None = None, days: int = 365) -> dict:
-    """Today's computed boundaries, plus a year-ahead collision scan.
+@app.post("/api/schedule/preview")
+def api_schedule_preview(body: dict = Body(...), days: int = 365) -> dict:
+    """Compute a profile's boundaries for today plus a year-ahead
+    collision scan. Accepts a profile body directly so the UI can
+    preview edits before they are saved.
 
     Section collisions are seasonal - a schedule that behaves perfectly
     in July can silently lose a section in December. Showing the year
     means a collision is something you see coming rather than discover.
     """
     from collections import Counter
-    from datetime import date as _date
     from datetime import timedelta as _td
 
     from app.scheduler import compute_day
@@ -296,10 +297,9 @@ def api_schedule_preview(room_id: str | None = None, days: int = 365) -> dict:
     if not state.runtime or not state.runtime.sun:
         raise HTTPException(status_code=409, detail="not connected to Home Assistant")
 
-    room = (state.config.room(room_id) if room_id and state.config
-            else (state.config.active_rooms[0] if state.config
-                  and state.config.active_rooms else None))
-    schedule = room.schedule if room else state.config.schedule
+    schedule = body if body.get("sections") else None
+    if schedule is None:
+        raise HTTPException(status_code=422, detail="no sections to preview")
     tz = state.runtime.tz
     today = datetime.now(tz).date()
 

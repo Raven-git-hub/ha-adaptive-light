@@ -378,3 +378,43 @@ td.detail { font-family: var(--mono); font-size: 11.5px; color: var(--faint); }
 }
 .reactive-list .rx:last-child { border-bottom: none; }
 .reactive-list .rx .t { font-family: var(--mono); color: var(--muted); min-width: 62px; }
+
+/* ---------- Time profiles ---------------------------------------- */
+
+.profile-card { border-left: 3px solid var(--accent-dim); }
+.profile-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.profile-head input.pname { flex: 0 1 240px; font-size: 15px; font-weight: 600; }
+.profile-head .pid { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+
+.section-editor { }
+.section-editor .srow {
+  display: grid;
+  grid-template-columns: 96px 130px 1fr 84px;
+  gap: 10px; align-items: center;
+  padding: 8px 0; border-bottom: 1px solid var(--border);
+}
+.section-editor .srow:last-of-type { border-bottom: none; }
+.section-editor .sname { font-weight: 500; }
+.section-editor .computed {
+  font-family: var(--mono); font-size: 13px; color: var(--accent);
+  text-align: right;
+}
+.section-editor .computed.collapsed { color: var(--faint); text-decoration: line-through; }
+
+.trigger-edit { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.trigger-edit select, .trigger-edit input { width: auto; }
+.trigger-edit input.time { width: 86px; font-family: var(--mono); }
+.trigger-edit input.offset { width: 66px; }
+.trigger-edit .unit { color: var(--faint); font-size: 12px; }
+
+.composite {
+  border: 1px solid var(--border); border-radius: 5px;
+  padding: 8px 10px; background: var(--bg); width: 100%;
+}
+.composite .sub {
+  display: flex; gap: 8px; align-items: center; margin-bottom: 6px;
+}
+.composite .sub:last-child { margin-bottom: 0; }
+.composite .addsub { margin-top: 4px; }
+
+.profile-preview { margin-top: 16px; }

@@ -9,8 +9,8 @@
     "version",
     "homeassistant",
     "system",
-    "schedule",
-    "rooms"
+    "rooms",
+    "schedule_profiles"
   ],
   "properties": {
     "version": {
@@ -103,12 +103,20 @@
           "minimum": 1,
           "default": 90,
           "description": "Retention for the UI event log. Heartbeat and reactive history are never auto-pruned."
+        },
+        "external_guards": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Entity ids of input_booleans that another system raises while it controls the lights. While any is on, brightness changes are attributed to that system rather than the user. For coexistence with a prototype during cutover; normally empty."
         }
       }
     },
     "schedule": {
       "$ref": "#/$defs/schedule",
-      "description": "Global default schedule. Rooms inherit this unless they set schedule_override."
+      "description": "Deprecated. Migrated into schedule_profiles['default'] on load. Retained so old config files still validate; new writes use schedule_profiles."
     },
     "learning": {
       "type": "object",
@@ -230,6 +238,14 @@
         "$ref": "#/$defs/room"
       },
       "description": "Rooms. An empty list is valid and is the fresh-install state: the container starts, serves the UI, and does nothing until the first room is added."
+    },
+    "schedule_profiles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/schedule_profile"
+      },
+      "description": "Reusable time-section schedules. A room references one by id, so several rooms can share a schedule and a single edit updates them all. A profile with id 'default' must always be present."
     }
   },
   "$defs": {
@@ -531,18 +547,6 @@
             "$ref": "#/$defs/group"
           }
         },
-        "schedule_override": {
-          "oneOf": [
-            {
-              "type": "null"
-            },
-            {
-              "$ref": "#/$defs/schedule"
-            }
-          ],
-          "default": null,
-          "description": "null inherits the global schedule. Set only when a room genuinely needs its own times - each override multiplies the generated scene automations by six."
-        },
         "scenes": {
           "type": "object",
           "additionalProperties": false,
@@ -574,6 +578,53 @@
               "$ref": "#/$defs/scene_config"
             }
           }
+        },
+        "schedule_profile": {
+          "$ref": "#/$defs/slug",
+          "description": "Which time profile this room follows. Defaults to 'default'."
+        }
+      }
+    },
+    "schedule_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "sections"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/slug",
+          "description": "Stable identifier. Rooms reference this, so it never changes even when the display name does."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Display name, freely editable."
+        },
+        "sections": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/section"
+          },
+          "description": "All six sections, always. Order in the array is canonical order (sunrise -> sleep), not necessarily chronological order on any given day."
+        },
+        "collision_policy": {
+          "enum": [
+            "collapse",
+            "clamp"
+          ],
+          "default": "collapse",
+          "description": "What to do when computed boundaries cross (e.g. UK summer sunset at 21:20 landing after night at 20:30, or a Nordic December where sunrise+3 overtakes sunset-3). 'collapse': the lower-priority section is skipped entirely for that day - honest about what happened. 'clamp': every section is forced to survive by shifting boundaries - keeps all six alive but silently distorts the times the user asked for."
+        },
+        "min_section_minutes": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 30,
+          "description": "A section shorter than this is collapsed. Prevents a two-minute section firing a 120s-transition scene that is overridden before it completes."
         }
       }
     }

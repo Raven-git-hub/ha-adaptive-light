@@ -149,6 +149,11 @@ class SystemConfig:
     data_dir: str
     csv_enabled: bool
     event_log_retention_days: int
+    # Booleans that some OTHER system raises while it drives the lights.
+    # While any is on, changes are attributed to that system, not the
+    # user. Used during coexistence with a prototype whose guard is not
+    # ours; normally empty.
+    external_guards: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -156,10 +161,17 @@ class Config:
     version: int
     homeassistant: HomeAssistant
     system: SystemConfig
-    schedule: dict[str, Any]
+    schedule_profiles: dict[str, dict]      # id -> profile
     learning: dict[str, Any]
     rooms: list[Room]
     raw: dict[str, Any] = field(repr=False, default_factory=dict)
+
+    def profile(self, profile_id: str) -> dict:
+        """The schedule a room follows. Falls back to 'default' if the
+        referenced profile has gone missing, so a room is never left
+        with no schedule at all."""
+        return self.schedule_profiles.get(profile_id) \
+            or self.schedule_profiles["default"]
 
     def room(self, room_id: str) -> Room | None:
         return next((r for r in self.rooms if r.id == room_id), None)
@@ -176,6 +188,22 @@ class Config:
 def _cross_check(doc: dict) -> list[str]:
     problems: list[str] = []
     seen_rooms: set[str] = set()
+
+    # -- schedule profiles --------------------------------------------
+    profiles = doc.get("schedule_profiles", [])
+    profile_ids = [p.get("id") for p in profiles]
+    if "default" not in profile_ids:
+        problems.append("schedule_profiles: a profile with id 'default' is required")
+    for dup in {i for i in profile_ids if profile_ids.count(i) > 1}:
+        problems.append(f"schedule_profiles: duplicate profile id '{dup}'")
+    for index, profile in enumerate(profiles):
+        where = f"profile[{index}]" + (f" '{profile['id']}'" if "id" in profile else "")
+        ids = [s["id"] for s in profile.get("sections", [])]
+        if sorted(ids) != sorted(SECTIONS):
+            problems.append(
+                f"{where}: must define all six sections, found "
+                f"{', '.join(ids) or 'none'}")
+    known_profiles = set(profile_ids)
 
     for index, room in enumerate(doc.get("rooms", [])):
         where = f"room[{index}]" + (f" '{room['id']}'" if "id" in room else "")
@@ -210,21 +238,68 @@ def _cross_check(doc: dict) -> list[str]:
                     f"{where} scene '{section}': refers to unknown group(s) "
                     f"{', '.join(sorted(extra))}")
 
-        schedule = room.get("schedule_override") or doc.get("schedule", {})
-        ids = [s["id"] for s in schedule.get("sections", [])]
-        if sorted(ids) != sorted(SECTIONS):
+        ref = room.get("schedule_profile", "default")
+        if ref not in known_profiles:
             problems.append(
-                f"{where}: schedule must define all six sections, found "
-                f"{', '.join(ids) or 'none'}")
+                f"{where}: references unknown time profile '{ref}'")
 
     return problems
 
 
+def _migrate_schedules(doc: dict) -> None:
+    """Fold the old `schedule` / `schedule_override` shapes into the
+    `schedule_profiles` list. Idempotent: a doc already using profiles
+    passes through unchanged apart from ensuring 'default' exists."""
+    profiles = doc.get("schedule_profiles")
+    if profiles is None:
+        profiles = []
+        doc["schedule_profiles"] = profiles
+
+    have = {p.get("id") for p in profiles}
+
+    # 1. ensure a 'default' profile exists, seeded from the old global
+    #    schedule if there was one, else from DEFAULT_SCHEDULE.
+    if "default" not in have:
+        base = doc.get("schedule") or json.loads(json.dumps(DEFAULT_SCHEDULE))
+        profiles.insert(0, {
+            "id": "default", "name": "Default",
+            "sections": base["sections"],
+            "collision_policy": base.get("collision_policy", "collapse"),
+            "min_section_minutes": base.get("min_section_minutes", 30),
+        })
+        have.add("default")
+
+    # 2. any room carrying a legacy schedule_override becomes a profile.
+    for room in doc.get("rooms", []):
+        override = room.pop("schedule_override", None)
+        if override:
+            pid = f"{room['id']}_schedule"
+            if pid not in have:
+                profiles.append({
+                    "id": pid, "name": f"{room.get('name', room['id'])} schedule",
+                    "sections": override["sections"],
+                    "collision_policy": override.get("collision_policy", "collapse"),
+                    "min_section_minutes": override.get("min_section_minutes", 30),
+                })
+                have.add(pid)
+            room["schedule_profile"] = pid
+
+    # The deprecated global key is no longer read; drop it so it cannot
+    # drift out of step with the 'default' profile.
+    doc.pop("schedule", None)
+
+
 def _apply_defaults(doc: dict) -> dict:
-    """JSON Schema documents defaults but does not apply them."""
+    """JSON Schema documents defaults but does not apply them.
+
+    Also migrates the two older schedule shapes into schedule_profiles:
+    a single global `schedule` becomes the 'default' profile, and any
+    per-room `schedule_override` becomes its own profile that the room
+    then references. Old config files therefore keep working untouched.
+    """
     doc.setdefault("version", 1)
-    doc.setdefault("schedule", json.loads(json.dumps(DEFAULT_SCHEDULE)))
     doc.setdefault("rooms", [])
+    _migrate_schedules(doc)
 
     ha = doc.setdefault("homeassistant", {})
     ha.setdefault("verify_ssl", True)
@@ -239,12 +314,10 @@ def _apply_defaults(doc: dict) -> dict:
     sysc.setdefault("csv_enabled", True)
     sysc.setdefault("event_log_retention_days", 90)
 
-    for schedule in [doc["schedule"]] + [
-        r["schedule_override"] for r in doc["rooms"] if r.get("schedule_override")
-    ]:
-        schedule.setdefault("collision_policy", "collapse")
-        schedule.setdefault("min_section_minutes", 30)
-        for section in schedule.get("sections", []):
+    for profile in doc["schedule_profiles"]:
+        profile.setdefault("collision_policy", "collapse")
+        profile.setdefault("min_section_minutes", 30)
+        for section in profile.get("sections", []):
             if "priority" not in section:
                 # A fixed clock time states something about the user's
                 # routine that holds whatever the sun is doing; a
@@ -256,7 +329,7 @@ def _apply_defaults(doc: dict) -> dict:
     for room in doc["rooms"]:
         room.setdefault("enabled", True)
         room.setdefault("presence_sensors", [])
-        room.setdefault("schedule_override", None)
+        room.setdefault("schedule_profile", "default")
         for section, scene in room.get("scenes", {}).items():
             scene.setdefault("lux_target_seed", None)
             scene.setdefault("lux_margin", 5)
@@ -277,9 +350,11 @@ def _trigger_priority(trigger: dict) -> int:
 
 
 def _build(doc: dict) -> Config:
+    profiles = {p["id"]: p for p in doc["schedule_profiles"]}
     rooms: list[Room] = []
     for room in doc["rooms"]:
-        schedule = room.get("schedule_override") or doc["schedule"]
+        schedule = profiles.get(room.get("schedule_profile", "default")) \
+                   or profiles["default"]
         rooms.append(Room(
             id=room["id"],
             name=room["name"],
@@ -326,8 +401,9 @@ def _build(doc: dict) -> Config:
             data_dir=os.environ.get("AL_DATA_DIR") or sysc["data_dir"],
             csv_enabled=sysc["csv_enabled"],
             event_log_retention_days=sysc["event_log_retention_days"],
+            external_guards=tuple(sysc.get("external_guards", [])),
         ),
-        schedule=doc["schedule"],
+        schedule_profiles={p["id"]: p for p in doc["schedule_profiles"]},
         learning=doc.get("learning", {}),
         rooms=rooms,
         raw=doc,
@@ -382,10 +458,16 @@ def save(config_doc: dict, path: str | Path) -> None:
 
 def blank() -> dict:
     """A fresh install: connection details only, no rooms yet."""
+    base = json.loads(json.dumps(DEFAULT_SCHEDULE))
     return {
         "version": 1,
         "homeassistant": {"base_url": "", "verify_ssl": True},
         "system": {},
-        "schedule": json.loads(json.dumps(DEFAULT_SCHEDULE)),
+        "schedule_profiles": [{
+            "id": "default", "name": "Default",
+            "sections": base["sections"],
+            "collision_policy": base["collision_policy"],
+            "min_section_minutes": base["min_section_minutes"],
+        }],
         "rooms": [],
     }

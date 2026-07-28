@@ -128,6 +128,19 @@ function renderConfig() {
       "Enter entity ids by hand, or check the container log."));
   }
 
+  /* -- time profiles ---------------------------------------------- */
+  ensureProfiles();
+  const profWrap = el("div", {});
+  profWrap.append(el("div", { className: "card", style: "border:none;padding-bottom:0" },
+    el("h2", {}, "Time profiles"),
+    el("p", { className: "hint" },
+      "A profile is a set of section times. Rooms choose a profile, so several " +
+      "rooms can share one schedule and a single edit updates them all. Fixed " +
+      "times beat sun-relative ones when they collide; the loser is skipped that " +
+      "day. Computed times for today are shown on the right as you edit.")));
+  renderProfiles(profWrap);
+  view.append(profWrap);
+
   /* -- rooms ------------------------------------------------------ */
   for (const [index, room] of cfg.rooms.entries()) {
     syncSceneGroups(room);
@@ -156,6 +169,14 @@ function renderConfig() {
         i.oninput = () => { room._idLocked = true; room.id = i.value; };
         return el("label", { style: "flex:0 1 190px" },
                   el("span", {}, "Identifier \u2014 permanent"), i);
+      })(),
+      (() => {
+        const sel = el("select", {}, ...cfg.schedule_profiles.map(p =>
+          el("option", { value: p.id, textContent: p.name,
+                         selected: (room.schedule_profile || "default") === p.id })));
+        sel.onchange = () => { room.schedule_profile = sel.value; };
+        return el("label", { style: "flex:0 1 200px" },
+                  el("span", {}, "Time profile"), sel);
       })(),
       el("button", { className: "btn danger sm right", textContent: "Remove room",
                      onclick: () => { cfg.rooms.splice(index, 1); renderConfig(); } })));
@@ -263,18 +284,6 @@ function renderConfig() {
       "No rooms yet. Add one to start observing."));
   }
 
-  /* -- schedule --------------------------------------------------- */
-  const sched = el("div", { className: "card" });
-  sched.append(el("h2", {}, "Sections"));
-  sched.append(el("p", { className: "hint" },
-    "Four boundaries follow the sun and two are fixed, so they can cross. " +
-    "A fixed time states something about your routine that holds whatever " +
-    "the sun does, so it wins \u2014 the loser is skipped for that day and " +
-    "recorded with a reason."));
-  sched.append(el("div", { id: "preview" }, el("span", { className: "faint" },
-    "Loading today\u2019s boundaries\u2026")));
-  view.append(sched);
-
   /* -- actions ---------------------------------------------------- */
   view.append(el("div", { className: "card" },
     el("div", { className: "row tight" },
@@ -289,42 +298,8 @@ function renderConfig() {
       "automations \u2014 disable any previous system first, or two will " +
       "drive the same lights."),
     el("div", { id: "deploy-report" })));
-
-  loadPreview();
 }
 
-async function loadPreview() {
-  const box = $("#preview");
-  if (!box) return;
-  try {
-    const p = await api("/api/schedule/preview");
-    box.replaceChildren();
-
-    const times = el("div", { className: "preview-times" });
-    for (const b of p.boundaries) {
-      times.append(el("div", { className: "slot" + (b.outcome === "ran" ? "" : " collapsed"),
-                               title: b.reason || "" },
-        el("div", { className: "n" }, b.name),
-        el("div", { className: "t" }, b.at || "\u2014")));
-    }
-    box.append(el("p", { className: "hint", style: "margin:0 0 8px" },
-      `Computed for ${p.date}`), times);
-
-    const collisions = Object.entries(p.collisions || {});
-    box.append(collisions.length
-      ? el("div", { className: "banner warn", style: "margin-top:14px" },
-          el("strong", {}, "Section collisions in the next year"),
-          el("ul", {}, collisions.map(([s, n]) =>
-            el("li", {}, `${s}: skipped on ${n} of ${p.days_scanned} days`))))
-      : el("div", { className: "banner ok", style: "margin-top:14px" },
-          `No collisions in the next ${p.days_scanned} days \u2014 all six ` +
-          `sections run every day at your latitude.`));
-  } catch (e) {
-    box.replaceChildren(el("span", { className: "faint" },
-      e.status === 409 ? "Connect to Home Assistant to preview section times."
-                       : "Could not load the preview."));
-  }
-}
 
 function cleanConfig() {
   // Strip UI bookkeeping before sending.
@@ -346,7 +321,6 @@ async function saveConfig() {
     });
     toast(`Saved \u2014 ${res.rooms} room(s) active`);
     await refreshStatus();
-    loadPreview();
   } catch (e) {
     const problems = e.body?.detail?.problems;
     const box = $("#deploy-report");
@@ -388,6 +362,189 @@ async function deploy() {
 async function loadConfig() {
   cfg = await api("/api/config");
   try { entities = await api("/api/entities"); } catch { entities = null; }
+  renderConfig();
+}
+
+
+/* ------------------------------------------------------------------
+   Time profiles
+   ------------------------------------------------------------------ */
+
+const SUN_EVENTS = ["sunrise", "sunset"];
+
+function ensureProfiles() {
+  // Older configs may still round-trip a bare `schedule`; the loader
+  // migrates on save, but the editor always works from the array.
+  if (!Array.isArray(cfg.schedule_profiles) || !cfg.schedule_profiles.length) {
+    cfg.schedule_profiles = [{
+      id: "default", name: "Default",
+      sections: SECTIONS.map(id => ({
+        id, name: id[0].toUpperCase() + id.slice(1),
+        trigger: { type: "clock", time: "12:00" },
+      })),
+      collision_policy: "collapse", min_section_minutes: 30,
+    }];
+  }
+}
+
+// -- one trigger editor; onChange fires a live re-preview ------------
+function triggerEditor(trigger, onChange) {
+  const wrap = el("div", { className: "trigger-edit" });
+
+  const kind = el("select", {},
+    el("option", { value: "clock", textContent: "Fixed time",
+                   selected: trigger.type === "clock" }),
+    el("option", { value: "sun", textContent: "Sun offset",
+                   selected: trigger.type === "sun" }),
+    el("option", { value: "earliest", textContent: "Earliest of",
+                   selected: trigger.type === "earliest" }),
+    el("option", { value: "latest", textContent: "Latest of",
+                   selected: trigger.type === "latest" }));
+
+  const body = el("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" });
+
+  const rebuildBody = () => {
+    body.replaceChildren();
+    if (trigger.type === "clock") {
+      const t = el("input", { className: "time", type: "time",
+                              value: trigger.time || "12:00" });
+      t.oninput = () => { trigger.time = t.value; onChange(); };
+      body.append(t);
+    } else if (trigger.type === "sun") {
+      const ev = el("select", {}, ...SUN_EVENTS.map(e =>
+        el("option", { value: e, textContent: e, selected: trigger.event === e })));
+      ev.onchange = () => { trigger.event = ev.value; onChange(); };
+      const off = el("input", { className: "offset", type: "number", step: "5",
+                                value: trigger.offset_minutes || 0 });
+      off.oninput = () => { trigger.offset_minutes = parseInt(off.value) || 0; onChange(); };
+      body.append(ev, off, el("span", { className: "unit" }, "min offset"));
+    } else {
+      // composite: earliest/latest of N sub-triggers (clock or sun)
+      trigger.of ||= [{ type: "clock", time: "05:30" },
+                      { type: "sun", event: "sunrise", offset_minutes: 0 }];
+      const box = el("div", { className: "composite" });
+      trigger.of.forEach((sub, i) => {
+        const subRow = el("div", { className: "sub" });
+        subRow.append(triggerEditor(sub, onChange));
+        if (trigger.of.length > 2) {
+          subRow.append(el("button", { className: "btn danger sm", textContent: "\u2715",
+            onclick: () => { trigger.of.splice(i, 1); onChange(); renderConfig(); } }));
+        }
+        box.append(subRow);
+      });
+      box.append(el("button", { className: "btn sm addsub", textContent: "+ add condition",
+        onclick: () => { trigger.of.push({ type: "clock", time: "12:00" });
+                         onChange(); renderConfig(); } }));
+      body.append(box);
+    }
+  };
+
+  kind.onchange = () => {
+    trigger.type = kind.value;
+    // clear fields that don't belong to the new type
+    if (trigger.type === "clock") { trigger.time ||= "12:00";
+      delete trigger.event; delete trigger.offset_minutes; delete trigger.of; }
+    else if (trigger.type === "sun") { trigger.event ||= "sunrise";
+      trigger.offset_minutes ||= 0; delete trigger.time; delete trigger.of; }
+    else { delete trigger.time; delete trigger.event; delete trigger.offset_minutes; }
+    rebuildBody(); onChange();
+  };
+
+  rebuildBody();
+  wrap.append(kind, body);
+  return wrap;
+}
+
+function renderProfiles(container) {
+  ensureProfiles();
+  for (const [pi, profile] of cfg.schedule_profiles.entries()) {
+    const inUse = cfg.rooms.filter(r => (r.schedule_profile || "default") === profile.id);
+    const card = el("div", { className: "card profile-card" });
+
+    const nameInput = el("input", { className: "pname", value: profile.name });
+    nameInput.oninput = () => { profile.name = nameInput.value; };
+
+    card.append(el("div", { className: "profile-head" },
+      nameInput,
+      el("span", { className: "pid" }, profile.id),
+      el("span", { className: "pill" }, `${inUse.length} room${inUse.length === 1 ? "" : "s"}`),
+      profile.id === "default"
+        ? el("span", { className: "pill accent right" }, "always present")
+        : el("button", { className: "btn danger sm right", textContent: "Delete profile",
+            onclick: () => deleteProfile(profile.id) })));
+
+    // section editor
+    const editor = el("div", { className: "section-editor" });
+    const byId = Object.fromEntries(profile.sections.map(s => [s.id, s]));
+    for (const sid of SECTIONS) {
+      const sec = byId[sid];
+      const row = el("div", { className: "srow" });
+      row.append(el("div", { className: "sname" }, sec.name || sid));
+      const preview = el("div", { className: "computed", id: `pv-${profile.id}-${sid}` }, "\u2026");
+      row.append(el("div", {}),  // spacer under the (implicit) type label column
+        triggerEditor(sec.trigger, () => previewProfile(profile)),
+        preview);
+      editor.append(row);
+    }
+    card.append(editor);
+    card.append(el("div", { className: "profile-preview", id: `pvbanner-${profile.id}` }));
+    container.append(card);
+
+    previewProfile(profile);
+  }
+
+  container.append(el("button", { className: "btn", textContent: "+ New time profile",
+    onclick: addProfile }));
+}
+
+async function previewProfile(profile) {
+  try {
+    const p = await api("/api/schedule/preview", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(profile),
+    });
+    for (const b of p.boundaries) {
+      const cell = document.getElementById(`pv-${profile.id}-${b.section}`);
+      if (cell) {
+        cell.textContent = b.at || "\u2014";
+        cell.classList.toggle("collapsed", b.outcome !== "ran");
+        cell.title = b.reason || "";
+      }
+    }
+    const banner = document.getElementById(`pvbanner-${profile.id}`);
+    if (banner) {
+      const collisions = Object.entries(p.collisions || {});
+      banner.replaceChildren(collisions.length
+        ? el("div", { className: "banner warn" },
+            el("strong", {}, "Collisions in the next year"),
+            el("ul", {}, collisions.map(([s, n]) =>
+              el("li", {}, `${s}: skipped on ${n} of ${p.days_scanned} days`))))
+        : el("div", { className: "banner ok" },
+            `No collisions in the next ${p.days_scanned} days.`));
+    }
+  } catch (e) {
+    const banner = document.getElementById(`pvbanner-${profile.id}`);
+    if (banner) banner.replaceChildren(el("span", { className: "faint" },
+      e.status === 409 ? "Connect to Home Assistant to preview times." : "Preview unavailable."));
+  }
+}
+
+function addProfile() {
+  const n = cfg.schedule_profiles.length;
+  const base = JSON.parse(JSON.stringify(cfg.schedule_profiles.find(p => p.id === "default")));
+  base.id = `profile_${n}`;
+  base.name = `Profile ${n}`;
+  cfg.schedule_profiles.push(base);
+  renderConfig();
+}
+
+function deleteProfile(id) {
+  const inUse = cfg.rooms.filter(r => (r.schedule_profile || "default") === id);
+  if (inUse.length) {
+    toast(`Can't delete: ${inUse.length} room(s) use this profile`, "err");
+    return;
+  }
+  cfg.schedule_profiles = cfg.schedule_profiles.filter(p => p.id !== id);
   renderConfig();
 }
 

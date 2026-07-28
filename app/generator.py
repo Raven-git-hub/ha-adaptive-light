@@ -114,9 +114,10 @@ def build_helpers(config: dict) -> dict[str, str]:
 
 
 def _sections_for(config: dict, room: dict) -> list[dict]:
-    override = room.get("schedule_override")
-    schedule = override if override else config["schedule"]
-    by_id = {s["id"]: s for s in schedule["sections"]}
+    profiles = {p["id"]: p for p in config.get("schedule_profiles", [])}
+    profile = profiles.get(room.get("schedule_profile", "default")) \
+              or profiles.get("default")
+    by_id = {s["id"]: s for s in profile["sections"]}
     return [by_id[s] for s in SECTIONS]
 
 
