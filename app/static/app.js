@@ -87,8 +87,9 @@ function syncSceneGroups(room) {
   // validate. Keeps the scene matrix in step with the group list.
   const ids = room.groups.map(g => g.id).filter(Boolean);
   for (const s of SECTIONS) {
-    const scene = room.scenes[s] ||= { groups: {} };
-    scene.groups ||= {};
+    if (!room.scenes[s]) room.scenes[s] = { groups: {} };
+    const scene = room.scenes[s];
+    if (!scene.groups) scene.groups = {};
     for (const id of ids) scene.groups[id] ||= { mode: "auto" };
     for (const id of Object.keys(scene.groups)) {
       if (!ids.includes(id)) delete scene.groups[id];
@@ -225,7 +226,8 @@ function renderConfig() {
       const tr = el("tr", {}, el("td", {}, s));
 
       for (const g of room.groups) {
-        const cell = scene.groups[g.id] ||= { mode: "auto" };
+        if (!scene.groups[g.id]) scene.groups[g.id] = { mode: "auto" };
+        const cell = scene.groups[g.id];
         const mkBtn = (mode, label) => {
           const b = el("button", { textContent: label });
           b.className = cell.mode === mode
