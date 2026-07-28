@@ -105,7 +105,6 @@ function entityPicker(list, value, onChange, placeholder) {
   }
   const input = el("input", {
     value: value || "", placeholder: placeholder || "entity id",
-    setAttribute: undefined,
   });
   input.setAttribute("list", id);
   input.oninput = () => {
