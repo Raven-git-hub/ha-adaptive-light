@@ -936,11 +936,17 @@ function drawChart(host, data) {
   const bandRects = data.sections.filter(s => s.lux_target != null && s.start);
   const drawHook = (u) => {
     const ctx = u.ctx;
+    const left = u.bbox.left, right = u.bbox.left + u.bbox.width;
     ctx.save();
-    // section target bands (lux scale)
+    // section target bands (lux scale). Clamped to the plot area: a
+    // section's recorded start can predate the day's first plotted
+    // heartbeat (e.g. after a restart mid-day), and without clamping
+    // that pushes the band off-canvas to the left of the axis.
     for (const s of bandRects) {
-      const x0 = u.valToPos(s.start, "x", true);
-      const x1 = u.valToPos(s.end || data.times[data.times.length - 1], "x", true);
+      const x0 = Math.max(left, u.valToPos(s.start, "x", true));
+      const x1 = Math.min(right,
+        u.valToPos(s.end || data.times[data.times.length - 1], "x", true));
+      if (x1 <= x0) continue;
       const yHi = u.valToPos(s.lux_target + (s.lux_margin || 5), "lux", true);
       const yLo = u.valToPos(Math.max(0, s.lux_target - (s.lux_margin || 5)), "lux", true);
       ctx.fillStyle = "rgba(240,180,41,0.10)";
@@ -956,6 +962,7 @@ function drawChart(host, data) {
     ctx.lineWidth = 2;
     for (const r of data.reactives) {
       const x = u.valToPos(r.t, "x", true);
+      if (x < left || x > right) continue;
       ctx.beginPath();
       ctx.moveTo(x, u.bbox.top); ctx.lineTo(x, u.bbox.top + u.bbox.height);
       ctx.stroke();

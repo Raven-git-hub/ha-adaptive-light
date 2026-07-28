@@ -117,6 +117,11 @@ class Runtime:
         # "nothing has happened in this room yet".
         self.events_seen = 0
         self.last_event_at: datetime | None = None
+        # Booleans a coexisting system raises while it drives the lights.
+        self.external_guards = set(config.system.external_guards)
+        self.external_guard_on = False
+        self._eg_state: dict[str, bool] = {}
+        self._eg_grace_until: datetime | None = None
 
     # -- lifecycle ----------------------------------------------------
 
@@ -227,6 +232,9 @@ class Runtime:
                               for s in rs.room.schedule["sections"]}
                 rs.fired_section = name_to_id.get(select["state"])
 
+        self._eg_state = {g: _is_on(states.get(g)) for g in self.external_guards}
+        self.external_guard_on = any(self._eg_state.values())
+
     # -- events -------------------------------------------------------
 
     def _on_state_changed(self, event: dict) -> None:
@@ -235,6 +243,18 @@ class Runtime:
         data = event.get("data", {})
         entity = data.get("entity_id", "")
         new = data.get("new_state")
+
+        if entity in self.external_guards:
+            was_on = _is_on(new)
+            self._eg_state[entity] = was_on
+            self.external_guard_on = any(self._eg_state.values())
+            if not self.external_guard_on:
+                # Hold suppression a few seconds past release: the
+                # external system clears its guard before its own
+                # transition has finished settling.
+                self._eg_grace_until = (datetime.now(self.tz)
+                                        + timedelta(seconds=8)) if self.tz else None
+            return
 
         for rs in self.rooms.values():
             rid = rs.room.id
@@ -260,12 +280,19 @@ class Runtime:
             #    an automation (a prototype still running, or our own
             #    maintenance after cutover), not a physical interaction.
             # A person flipping a physical switch produces neither.
-            if rs.guard_on:
+            if rs.guard_on or self._external_active():
                 return
             if _automation_caused(new):
                 return
             self._note_user_change(rs, group.id, previous, reading)
             return
+
+    def _external_active(self) -> bool:
+        if self.external_guard_on:
+            return True
+        if self._eg_grace_until and self.tz:
+            return datetime.now(self.tz) < self._eg_grace_until
+        return False
 
     def _note_user_change(self, rs: RoomState, group_id: str,
                           before: tuple[bool, int | None],
@@ -391,6 +418,18 @@ class Runtime:
         aid = scene_automation_id(rs.room.id, section)
         entity = self.automation_entities.get(aid)
         late = (now - started).total_seconds()
+
+        # Close out the section that is ending. Without this its
+        # section_run row keeps ended_at=null forever, and the Analysis
+        # chart's target band then has nothing to stop at - it falls
+        # back to the end of the day's plotted data and runs straight
+        # through every later section instead of stopping at the real
+        # boundary. Sleep can straddle midnight, so the close is filed
+        # under the calendar date it was FIRED on, not today's.
+        if rs.fired_section and rs.fired_at:
+            self.store.close_section_run(
+                rs.room.id, rs.fired_at.date().isoformat(),
+                rs.fired_section, now)
 
         if entity is None:
             self.store.log_event(
