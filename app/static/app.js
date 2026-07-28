@@ -602,6 +602,180 @@ function countdownText(iso) {
 }
 
 /* ------------------------------------------------------------------
+   Analysis
+   ------------------------------------------------------------------ */
+
+let analysisDate = null;
+let analysisChart = null;
+
+// One stable colour per group, assigned by position.
+const GROUP_COLORS = ["#f0b429", "#4f93d6", "#5fc97a", "#c77dd6", "#d68a4f", "#68c9c1"];
+
+async function renderAnalysis() {
+  const view = $("#view");
+  const rooms = Object.keys(status.rooms || {});
+  if (!rooms.length) {
+    view.replaceChildren(el("div", { className: "empty" },
+      "No rooms configured yet."));
+    return;
+  }
+  const roomId = rooms[0];
+
+  let data;
+  try {
+    const q = analysisDate ? `?date=${analysisDate}` : "";
+    data = await api(`/api/analysis/${roomId}${q}`);
+  } catch (e) {
+    view.replaceChildren(el("div", { className: "empty" },
+      e.status === 409 ? "No configuration." : "Could not load analysis data."));
+    return;
+  }
+  analysisDate = data.date;
+
+  view.replaceChildren();
+  const card = el("div", { className: "card" });
+
+  const dates = data.available_dates.length ? data.available_dates : [data.date];
+  const idx = dates.indexOf(data.date);
+  const step = (delta) => {
+    const target = dates[idx + delta];
+    if (target) { analysisDate = target; renderAnalysis(); }
+  };
+
+  card.append(el("div", { className: "analysis-head" },
+    el("h2", { style: "margin:0" }, data.name),
+    el("button", { className: "btn sm", textContent: "\u2039 Earlier",
+                   disabled: idx >= dates.length - 1, onclick: () => step(1) }),
+    el("span", { className: "date" }, data.date),
+    el("button", { className: "btn sm", textContent: "Later \u203a",
+                   disabled: idx <= 0, onclick: () => step(-1) }),
+    el("span", { className: "muted", style: "margin-left:auto" },
+      `${data.heartbeats} heartbeats`)));
+
+  if (!data.heartbeats) {
+    card.append(el("div", { className: "empty" },
+      "No observations recorded on this day."));
+    view.append(card);
+    return;
+  }
+
+  const host = el("div", { className: "chart-wrap" });
+  card.append(host);
+
+  card.append(el("div", { className: "chart-note" },
+    el("span", {}, el("span", { className: "swatch",
+      style: "background:#e6e9f0" }), "Measured lux"),
+    el("span", {}, el("span", { className: "swatch band" }), "Target band"),
+    el("span", {}, el("span", { className: "swatch react" }), "You intervened"),
+    el("span", { className: "faint" }, "\u2014 brightness on the right axis, 0\u2013255")));
+
+  // Reactive events, listed under the chart for detail.
+  if (data.reactives.length) {
+    const list = el("div", { className: "reactive-list" });
+    list.append(el("h2", { style: "font-size:13px;margin:18px 0 6px" },
+      "Interventions"));
+    for (const r of data.reactives) {
+      list.append(el("div", { className: "rx" },
+        el("span", { className: "t" },
+          new Date(r.t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })),
+        el("span", { className: "pill warn" }, r.section),
+        el("span", { className: "muted" },
+          r.lux_before != null && r.lux_after != null
+            ? `lux ${r.lux_before} \u2192 ${r.lux_after}` : ""),
+        r.suspended ? el("span", { className: "pill" }, "maintenance paused") : null));
+    }
+    card.append(list);
+  }
+
+  view.append(card);
+  drawChart(host, data);
+}
+
+function drawChart(host, data) {
+  if (analysisChart) { analysisChart.destroy(); analysisChart = null; }
+
+  // uPlot series: [time, lux, ...group brightness]. Brightness shares a
+  // second y-scale so a 0-255 line and a 0-50 lux line coexist.
+  const series = [
+    {},
+    { label: "lux", scale: "lux", stroke: "#e6e9f0", width: 2,
+      points: { show: false }, value: (u, v) => v == null ? "\u2014" : v.toFixed(1) },
+  ];
+  const dataArr = [data.times, data.lux];
+
+  data.group_ids.forEach((g, i) => {
+    series.push({
+      label: data.group_names[g] || g, scale: "bri",
+      stroke: GROUP_COLORS[i % GROUP_COLORS.length], width: 1.5,
+      points: { show: false },
+      value: (u, v) => v == null ? "\u2014" : String(v),
+    });
+    dataArr.push(data.brightness[g]);
+  });
+
+  // Draw target bands and reactive lines behind the series.
+  const bandRects = data.sections.filter(s => s.lux_target != null && s.start);
+  const drawHook = (u) => {
+    const ctx = u.ctx;
+    ctx.save();
+    // section target bands (lux scale)
+    for (const s of bandRects) {
+      const x0 = u.valToPos(s.start, "x", true);
+      const x1 = u.valToPos(s.end || data.times[data.times.length - 1], "x", true);
+      const yHi = u.valToPos(s.lux_target + (s.lux_margin || 5), "lux", true);
+      const yLo = u.valToPos(Math.max(0, s.lux_target - (s.lux_margin || 5)), "lux", true);
+      ctx.fillStyle = "rgba(240,180,41,0.10)";
+      ctx.fillRect(x0, yHi, x1 - x0, yLo - yHi);
+      ctx.strokeStyle = "rgba(240,180,41,0.35)";
+      ctx.setLineDash([4, 4]);
+      const yT = u.valToPos(s.lux_target, "lux", true);
+      ctx.beginPath(); ctx.moveTo(x0, yT); ctx.lineTo(x1, yT); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    // reactive markers
+    ctx.strokeStyle = "rgba(210,153,34,0.8)";
+    ctx.lineWidth = 2;
+    for (const r of data.reactives) {
+      const x = u.valToPos(r.t, "x", true);
+      ctx.beginPath();
+      ctx.moveTo(x, u.bbox.top); ctx.lineTo(x, u.bbox.top + u.bbox.height);
+      ctx.stroke();
+    }
+    ctx.restore();
+  };
+
+  const opts = {
+    width: host.clientWidth || 960,
+    height: 420,
+    scales: { x: { time: true }, lux: {}, bri: { range: [0, 255] } },
+    axes: [
+      { stroke: "#5a6274", grid: { stroke: "#272c3855" },
+        ticks: { stroke: "#272c38" } },
+      { scale: "lux", stroke: "#8b93a7", label: "lux",
+        grid: { stroke: "#272c3844" } },
+      { scale: "bri", side: 1, stroke: "#8b93a7", label: "brightness",
+        grid: { show: false } },
+    ],
+    series,
+    hooks: { draw: [drawHook] },
+    legend: { live: true },
+    cursor: { drag: { x: true, y: false } },
+  };
+
+  analysisChart = new uPlot(opts, dataArr, host);
+
+  // Redraw on resize so it stays full-width.
+  if (!drawChart._resize) {
+    drawChart._resize = () => {
+      if (analysisChart && host.clientWidth) {
+        analysisChart.setSize({ width: host.clientWidth, height: 420 });
+      }
+    };
+    window.addEventListener("resize", drawChart._resize);
+  }
+}
+
+/* ------------------------------------------------------------------
    Routing
    ------------------------------------------------------------------ */
 
@@ -609,9 +783,7 @@ const VIEWS = {
   config: loadConfig,
   log: renderLog,
   now: renderNow,
-  analysis: () => stub("Analysis", "Measured lux against target with the margin " +
-                                   "band, per-group brightness, section bands and " +
-                                   "reactive markers."),
+  analysis: renderAnalysis,
   almanac: () => stub("Almanac", "The learned model: sections down, groups across, " +
                                  "with on-fraction and confidence."),
 };
@@ -624,6 +796,7 @@ function stub(title, description) {
 
 function go(name) {
   if (nowTimer && name !== "now") { clearInterval(nowTimer); nowTimer = null; }
+  if (analysisChart && name !== "analysis") { analysisChart.destroy(); analysisChart = null; }
   for (const b of $("#tabs").children) b.classList.toggle("active", b.dataset.view === name);
   location.hash = name;
   (VIEWS[name] || VIEWS.config)();

@@ -398,6 +398,121 @@ async def api_now(room_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------
+# Analysis - a day of series, aligned for charting
+# ---------------------------------------------------------------------
+
+@app.get("/api/analysis/{room_id}")
+def api_analysis(room_id: str, date: str | None = None) -> dict:
+    """One local day of observations for one room, shaped for a chart.
+
+    Returns parallel arrays on a shared unix-second time axis: measured
+    lux, per-group brightness, the target band per section, section
+    boundaries, and reactive markers. Everything the chart draws comes
+    from stored data - no Home Assistant call - so history is browsable
+    even when disconnected.
+    """
+    from datetime import date as _date
+    from datetime import datetime as _dt
+
+    if not state.config:
+        raise HTTPException(status_code=409, detail="no configuration")
+    room = state.config.room(room_id)
+    if room is None:
+        raise HTTPException(status_code=404, detail=f"no such room: {room_id}")
+    if not state.store:
+        raise HTTPException(status_code=503, detail="store unavailable")
+
+    local_date = date or _date.today().isoformat()
+    conn = state.store.connection
+    group_ids = room.group_ids
+
+    def epoch(iso: str) -> int:
+        return int(_dt.fromisoformat(iso).timestamp())
+
+    # -- heartbeats: the backbone time axis ---------------------------
+    hb = conn.execute(
+        "SELECT id, ts, section, ambient_lux, occupied, any_light_on "
+        "FROM heartbeat WHERE room_id=? AND local_date=? ORDER BY ts",
+        (room_id, local_date)).fetchall()
+
+    times: list[int] = []
+    lux: list[float | None] = []
+    section_at: list[str] = []
+    occupied: list[int] = []
+    bright: dict[str, list[int | None]] = {g: [] for g in group_ids}
+
+    hb_ids = [row["id"] for row in hb]
+    per_hb: dict[int, dict[str, int | None]] = {i: {} for i in hb_ids}
+    if hb_ids:
+        marks = ",".join("?" * len(hb_ids))
+        for hid, gid, is_on, b in conn.execute(
+            f"SELECT heartbeat_id, group_id, is_on, brightness FROM heartbeat_group "
+            f"WHERE heartbeat_id IN ({marks})", hb_ids):
+            # Off reads as 0 on the chart, not a gap: the line should sit
+            # on the floor, not vanish.
+            per_hb[hid][gid] = b if is_on else 0
+
+    for row in hb:
+        times.append(epoch(row["ts"]))
+        lux.append(row["ambient_lux"])
+        section_at.append(row["section"])
+        occupied.append(row["occupied"])
+        for g in group_ids:
+            bright[g].append(per_hb[row["id"]].get(g))
+
+    # -- reactive markers ---------------------------------------------
+    reactives = [
+        {"t": epoch(r["ts"]), "section": r["section"],
+         "lux_before": r["lux_before"], "lux_after": r["lux_after"],
+         "suspended": bool(r["suspended_maint"])}
+        for r in conn.execute(
+            "SELECT ts, section, lux_before, lux_after, suspended_maint "
+            "FROM reactive WHERE room_id=? AND local_date=? ORDER BY ts",
+            (room_id, local_date))
+    ]
+
+    # -- section runs: boundary bands and, with the almanac, the target
+    #    band the maintenance loop was working within -------------------
+    runs = conn.execute(
+        "SELECT section, planned_start, actual_start, ended_at, outcome, "
+        "outcome_reason FROM section_run WHERE room_id=? AND local_date=? "
+        "ORDER BY COALESCE(actual_start, planned_start)",
+        (room_id, local_date)).fetchall()
+
+    almanac = state.store.current_almanac(room_id) or {}
+    sections = []
+    for r in runs:
+        start = r["actual_start"] or r["planned_start"]
+        entry = almanac.get(r["section"]) if isinstance(almanac, dict) else None
+        sections.append({
+            "section": r["section"],
+            "start": epoch(start) if start else None,
+            "end": epoch(r["ended_at"]) if r["ended_at"] else None,
+            "outcome": r["outcome"], "reason": r["outcome_reason"],
+            "lux_target": entry.get("lux_target") if isinstance(entry, dict) else None,
+            "lux_margin": entry.get("lux_margin", 5) if isinstance(entry, dict) else None,
+            "maintenance": entry.get("maintenance_enabled")
+                           if isinstance(entry, dict) else None,
+        })
+
+    # Available dates, so the stepper knows how far back data goes.
+    dates = [r["local_date"] for r in conn.execute(
+        "SELECT DISTINCT local_date FROM heartbeat WHERE room_id=? "
+        "ORDER BY local_date DESC LIMIT 90", (room_id,))]
+
+    return {
+        "room_id": room_id, "name": room.name, "date": local_date,
+        "group_ids": group_ids,
+        "group_names": {g.id: g.name for g in room.groups},
+        "times": times, "lux": lux, "occupied": occupied,
+        "brightness": bright,
+        "sections": sections, "reactives": reactives,
+        "available_dates": dates,
+        "heartbeats": len(hb),
+    }
+
+
+# ---------------------------------------------------------------------
 # Static UI
 # ---------------------------------------------------------------------
 

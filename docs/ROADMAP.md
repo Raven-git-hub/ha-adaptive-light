@@ -15,7 +15,8 @@
 | 6a | Config API and deployment to Home Assistant | **done** — `app/deploy.py`, endpoints in `app/main.py` |
 | 6b | UI shell, status strip, Config and Log | **done** — `app/static/` |
 | 7a | UI — Now (live dashboard) | **done** — `/api/now`, Now view |
-| 7b | UI — Analysis (day chart, uPlot) | next |
+| 7b | UI — Analysis (day chart, uPlot) | **done** — `/api/analysis`, Analysis view, vendored uPlot |
+| 8 | UI — Almanac, with the auto/off control | next |
 | 8 | UI — Almanac, with the auto/off control | |
 | 9 | Home Assistant add-on packaging | |
 
