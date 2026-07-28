@@ -253,10 +253,16 @@ class Runtime:
             previous = rs.last_states.get(entity, (False, None))
             rs.last_states[entity] = reading
 
-            # The guard is what separates our own changes from a human's.
-            # No user_id check: a physical dimmer press carries no user,
-            # and the guard already excludes everything we caused.
+            # Two independent ways to know a change was not a human at a
+            # switch, and either is sufficient to ignore it:
+            #  * the guard boolean is on - our own automation is mid-change;
+            #  * the change carries a context.parent_id - it was caused by
+            #    an automation (a prototype still running, or our own
+            #    maintenance after cutover), not a physical interaction.
+            # A person flipping a physical switch produces neither.
             if rs.guard_on:
+                return
+            if _automation_caused(new):
                 return
             self._note_user_change(rs, group.id, previous, reading)
             return
@@ -627,6 +633,16 @@ class Runtime:
 
 def _is_on(state: dict | None) -> bool:
     return bool(state) and state.get("state") == "on"
+
+
+def _automation_caused(state: dict | None) -> bool:
+    """True when a state change was produced by an automation or script
+    rather than a person. Home Assistant threads a parent_id through the
+    context of any change it triggers itself; a physical switch press or
+    a direct user action has none."""
+    if not state:
+        return False
+    return bool((state.get("context") or {}).get("parent_id"))
 
 
 def _reading(state: dict | None) -> tuple[bool, int | None]:

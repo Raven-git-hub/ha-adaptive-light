@@ -55,7 +55,7 @@ clamping cannot fix, since shifting the sunset scene later still leaves it
 running after the night scene. Order inversions always collapse.
 
 Measured over 2026: zero collapses at equatorial and Perth latitudes, 131 at
-London, 529 at Tromsø. This only bites above roughly 45°.
+London, 508 at Tromsø. This only bites above roughly 45°.
 
 ---
 
@@ -275,3 +275,22 @@ deferred heartbeats.
 
 `section_run` records what was *planned* against what *happened*, so a collapsed
 or missed section appears as a row with a reason rather than as silence.
+
+---
+
+## 18. Reactive detection ignores automation-caused changes
+
+The runtime treats a brightness change as a human intervention only when
+it was not caused by an automation. Two independent signals establish
+this, either sufficient: the guard boolean being on (our own automation
+is mid-change), or the change carrying a `context.parent_id` (Home
+Assistant threads one through any change an automation or script
+triggers; a physical switch press or direct user action has none).
+
+Without the second signal, any other automation touching these lights is
+learned from at 5x weight. During the transition that means a still-running
+prototype's ten-minute maintenance nudge is recorded as a user
+intervention every ten minutes; after cutover it would mean our own
+maintenance loop being learned from as if it were the user. Neither is a
+real preference, and both would corrupt the almanac.
+
