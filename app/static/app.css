@@ -418,3 +418,21 @@ td.detail { font-family: var(--mono); font-size: 11.5px; color: var(--faint); }
 .composite .addsub { margin-top: 4px; }
 
 .profile-preview { margin-top: 16px; }
+
+/* ---------- collapsible -------------------------------------------- */
+
+.collapse-head {
+  display: flex; align-items: center; gap: 10px; cursor: pointer;
+  user-select: none;
+}
+.collapse-head .chev {
+  color: var(--faint); font-size: 12px; transition: transform .15s;
+  width: 12px; display: inline-block;
+}
+.collapse-head.closed .chev { transform: rotate(-90deg); }
+.collapse-head:hover .chev { color: var(--accent); }
+.collapse-body.hidden { display: none; }
+
+/* profile header sits on one line even when collapsed */
+.profile-card .profile-head { margin-bottom: 0; }
+.profile-card.open .profile-head { margin-bottom: 14px; }

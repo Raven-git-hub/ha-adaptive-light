@@ -14,6 +14,27 @@ const el = (tag, props = {}, ...kids) => {
   return n;
 };
 
+// Collapse state persists across the frequent full re-renders of Config.
+const collapsed = { profilesSection: false };  // keyed; profiles add their own
+
+function collapsible(key, headContent, buildBody, opts = {}) {
+  const isClosed = collapsed[key] ?? opts.defaultClosed ?? false;
+  const head = el("div", { className: "collapse-head" + (isClosed ? " closed" : "") },
+    el("span", { className: "chev" }, "\u25be"), ...[].concat(headContent));
+  const body = el("div", { className: "collapse-body" + (isClosed ? " hidden" : "") });
+  if (!isClosed) buildBody(body);
+  head.addEventListener("click", (e) => {
+    // Clicks on inputs/buttons inside the header must not toggle.
+    if (e.target.closest("input, select, button")) return;
+    const nowClosed = !head.classList.contains("closed");
+    collapsed[key] = nowClosed;
+    head.classList.toggle("closed", nowClosed);
+    body.classList.toggle("hidden", nowClosed);
+    if (!nowClosed && !body.childElementCount) buildBody(body);
+  });
+  return { head, body };
+}
+
 async function api(path, opts) {
   const res = await fetch(path, opts);
   const body = res.status === 204 ? null : await res.json().catch(() => null);
@@ -130,16 +151,21 @@ function renderConfig() {
 
   /* -- time profiles ---------------------------------------------- */
   ensureProfiles();
-  const profWrap = el("div", {});
-  profWrap.append(el("div", { className: "card", style: "border:none;padding-bottom:0" },
-    el("h2", {}, "Time profiles"),
-    el("p", { className: "hint" },
-      "A profile is a set of section times. Rooms choose a profile, so several " +
-      "rooms can share one schedule and a single edit updates them all. Fixed " +
-      "times beat sun-relative ones when they collide; the loser is skipped that " +
-      "day. Computed times for today are shown on the right as you edit.")));
-  renderProfiles(profWrap);
-  view.append(profWrap);
+  const profCard = el("div", { className: "card" });
+  const profSection = collapsible("profilesSection",
+    el("h2", { style: "margin:0" }, "Time profiles",
+       el("span", { className: "pill", style: "margin-left:8px" },
+          `${cfg.schedule_profiles.length}`)),
+    (body) => {
+      body.append(el("p", { className: "hint" },
+        "A profile is a set of section times. Rooms choose a profile, so several " +
+        "rooms can share one schedule and a single edit updates them all. Fixed " +
+        "times beat sun-relative ones when they collide; the loser is skipped that " +
+        "day. Computed times for today are shown on the right as you edit."));
+      renderProfiles(body);
+    });
+  profCard.append(profSection.head, profSection.body);
+  view.append(profCard);
 
   /* -- rooms ------------------------------------------------------ */
   for (const [index, room] of cfg.rooms.entries()) {
@@ -464,33 +490,41 @@ function renderProfiles(container) {
     const nameInput = el("input", { className: "pname", value: profile.name });
     nameInput.oninput = () => { profile.name = nameInput.value; };
 
-    card.append(el("div", { className: "profile-head" },
-      nameInput,
-      el("span", { className: "pid" }, profile.id),
-      el("span", { className: "pill" }, `${inUse.length} room${inUse.length === 1 ? "" : "s"}`),
-      profile.id === "default"
-        ? el("span", { className: "pill accent right" }, "always present")
-        : el("button", { className: "btn danger sm right", textContent: "Delete profile",
-            onclick: () => deleteProfile(profile.id) })));
-
-    // section editor
-    const editor = el("div", { className: "section-editor" });
-    const byId = Object.fromEntries(profile.sections.map(s => [s.id, s]));
-    for (const sid of SECTIONS) {
-      const sec = byId[sid];
-      const row = el("div", { className: "srow" });
-      row.append(el("div", { className: "sname" }, sec.name || sid));
-      const preview = el("div", { className: "computed", id: `pv-${profile.id}-${sid}` }, "\u2026");
-      row.append(el("div", {}),  // spacer under the (implicit) type label column
-        triggerEditor(sec.trigger, () => previewProfile(profile)),
-        preview);
-      editor.append(row);
-    }
-    card.append(editor);
-    card.append(el("div", { className: "profile-preview", id: `pvbanner-${profile.id}` }));
+    const key = `profile:${profile.id}`;
+    const pc = collapsible(key,
+      el("div", { className: "profile-head", style: "flex:1" },
+        nameInput,
+        el("span", { className: "pid" }, profile.id),
+        el("span", { className: "pill" },
+           `${inUse.length} room${inUse.length === 1 ? "" : "s"}`),
+        profile.id === "default"
+          ? el("span", { className: "pill accent right" }, "always present")
+          : el("button", { className: "btn danger sm right", textContent: "Delete profile",
+              onclick: () => deleteProfile(profile.id) })),
+      (body) => {
+        const editor = el("div", { className: "section-editor" });
+        const byId = Object.fromEntries(profile.sections.map(s => [s.id, s]));
+        for (const sid of SECTIONS) {
+          const sec = byId[sid];
+          const row = el("div", { className: "srow" });
+          row.append(el("div", { className: "sname" }, sec.name || sid));
+          const preview = el("div", { className: "computed",
+            id: `pv-${profile.id}-${sid}` }, "\u2026");
+          row.append(el("div", {}),
+            triggerEditor(sec.trigger, () => previewProfile(profile)),
+            preview);
+          editor.append(row);
+        }
+        body.append(editor);
+        body.append(el("div", { className: "profile-preview",
+          id: `pvbanner-${profile.id}` }));
+        previewProfile(profile);
+      },
+      { defaultClosed: profile.id !== "default" });
+    // The collapsible already renders a chevron; the profile-head has its
+    // own, so drop the duplicate wrapper chevron by using pc.head content.
+    card.append(pc.head, pc.body);
     container.append(card);
-
-    previewProfile(profile);
   }
 
   container.append(el("button", { className: "btn", textContent: "+ New time profile",
