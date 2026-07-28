@@ -1006,15 +1006,7 @@ function drawChart(host, data) {
    Almanac
    ------------------------------------------------------------------ */
 
-let almanacCharts = [];
-
-function destroyAlmanacCharts() {
-  for (const c of almanacCharts) { try { c.destroy(); } catch {} }
-  almanacCharts = [];
-}
-
 async function renderAlmanac() {
-  destroyAlmanacCharts();
   const view = $("#view");
   const rooms = Object.keys(status.rooms || {});
   if (!rooms.length) {
@@ -1040,17 +1032,9 @@ async function renderAlmanac() {
 
 function almanacCard(roomId, name, almanac, history) {
   const meta = almanac?._meta || {};
-  const roomCfg = cfg?.rooms?.find(r => r.id === roomId);
-
-  // Group ids come from config, so every group shows even before it has
-  // been learned; fall back to whatever a section entry exposes.
-  const groupIds = roomCfg?.groups?.map(g => g.id)
-    || Object.keys((almanac?.[SECTIONS.find(s => almanac?.[s])] || {}).on_fraction || {});
-  const groupName = (g) => roomCfg?.groups?.find(gr => gr.id === g)?.name || g;
 
   const card = el("div", { className: "card almanac-room" });
 
-  // -- header (always visible) --------------------------------------
   const header = el("div", { className: "almanac-meta" },
     el("h2", { style: "margin:0" }, name),
     el("span", { className: `badge ${meta.mode || "provisional"}` },
@@ -1062,149 +1046,84 @@ function almanacCard(roomId, name, almanac, history) {
                    onclick: (e) => { e.stopPropagation(); rebuildAlmanac(roomId); } }));
 
   const c = collapsible(`almanac:${roomId}`, header, (body) => {
-    const split = el("div", { className: "almanac-split" });
-
-    // ---- LEFT: the learned matrix, all six sections always present --
-    const left = el("div", {});
-    left.append(el("p", { className: "hint", style: "margin:0 0 8px" },
-      "What the system has learned it should do in each section: the lux it " +
-      "aims for, and each group\u2019s learned brightness. The bar shows how " +
-      "often a group was actually on; a brighter cell means more confident. " +
-      "Auto lets it learn; Off holds a group off for that section."));
+    body.append(el("p", { className: "hint", style: "margin:0 0 10px" },
+      "The lux level learned for each section, and how it has settled over " +
+      "recent nights. Rising trust means recent readings agree with each " +
+      "other; a flat line means the target has converged. Per-group brightness " +
+      "and the auto/off choice live on the Config tab."));
 
     const head = el("tr", {}, el("th", {}, "Section"),
-      ...groupIds.map(g => el("th", {}, groupName(g))));
-    const bodyRows = el("tbody");
+      el("th", {}, "Lux target"), el("th", { className: "trendcol" }, "Trend"));
+    const rows = el("tbody");
 
     for (const sec of SECTIONS) {
       const e = (almanac && typeof almanac[sec] === "object") ? almanac[sec] : null;
-      const conf = !e ? "low"
-        : e.high_confidence_days > 2 ? "high"
-        : (e.days_contributing > 1 ? "medium" : "low");
-      const tr = el("tr", { "data-sec": sec },
-        el("td", { className: "sechead" },
-          el("div", {}, sec),
-          el("div", { className: "lux" },
-             e && e.lux_target != null ? `${e.lux_target} \u00b1${e.lux_margin}` : "\u2014"),
+      const sd = history?.sections?.[sec];
+
+      const tr = el("tr", {},
+        el("td", { className: "sechead" }, sec),
+        el("td", { className: "luxcell" },
+          e && e.lux_target != null
+            ? el("span", {}, `${e.lux_target}`,
+                el("span", { className: "faint" }, ` \u00b1${e.lux_margin}`))
+            : el("span", { className: "faint" }, "\u2014"),
           el("div", { className: "sub" },
              e ? `${e.days_contributing}d${e.maintenance_enabled ? "" : " \u00b7 maint off"}`
-               : "no data yet")));
-
-      for (const g of groupIds) {
-        const val = e ? e[g] : undefined;
-        const frac = e ? (e.on_fraction || {})[g] : undefined;
-        const cell = el("td", { className: `cell conf-${conf}` });
-        const briClass = val === 0 ? "bri off" : (val == null ? "bri none" : "bri");
-        cell.append(el("div", { className: briClass },
-          val === 0 ? "off" : val == null ? "\u2014" : String(val)));
-        if (frac != null) {
-          cell.append(el("div", { className: "onfrac",
-            title: `on ${Math.round(frac * 100)}% of samples` },
-            el("div", { className: "fill", style: `width:${Math.round(frac * 100)}%` })));
-        }
-        const sceneG = roomCfg?.scenes?.[sec]?.groups?.[g];
-        if (sceneG) {
-          const tg = el("div", { className: "toggle" });
-          const mk = (mode, label) => {
-            const b = el("button", { textContent: label });
-            b.className = sceneG.mode === mode
-              ? "on" + (mode === "off" ? " off-state" : "") : "";
-            b.onclick = async () => { sceneG.mode = mode; await saveConfig(); renderAlmanac(); };
-            return b;
-          };
-          tg.append(mk("auto", "Auto"), mk("off", "Off"));
-          cell.append(tg);
-        }
-        tr.append(cell);
-      }
-      bodyRows.append(tr);
+               : "no data yet")),
+        el("td", { className: "trendcol" }, sparklineCell(sd, history?.thresholds)));
+      rows.append(tr);
     }
-    left.append(el("table", { className: "almanac" }, el("thead", {}, head), bodyRows));
-    split.append(left);
-
-    // ---- RIGHT: one trend per section, SAME order and row heights ---
-    const right = el("div", {});
-    const snaps = history?.snapshots || 0;
-    right.append(el("p", { className: "hint", style: "margin:0 0 8px" },
-      snaps > 1
-        ? `Target and trust over the last ${snaps} snapshots. Trust rises with ` +
-          `recent, confident, consistent data; the dashed lines are the medium ` +
-          `and high thresholds.`
-        : "Trends appear once a few nightly analyses accumulate \u2014 there is " +
-          "not enough history to plot yet."));
-
-    for (const sec of SECTIONS) {
-      const sd = history?.sections?.[sec];
-      const holder = el("div", { className: "trend-section", "data-sec": sec });
-      holder.append(el("div", { className: "thead" },
-        el("span", { className: "nm" }, sec),
-        el("span", { className: "now" },
-           sd && sd.trust_weight.length ? `${sd.trust_weight.at(-1)} trust` : "")));
-      const chart = el("div", { className: "trend-chart" });
-      holder.append(chart);
-      right.append(holder);
-      if (sd && sd.generated_at.length > 1) {
-        queueMicrotask(() => drawTrend(chart, sd, history.thresholds));
-      } else {
-        chart.replaceChildren(el("div", { className: "trend-empty" },
-          sd && sd.generated_at.length === 1 ? "one snapshot so far" : "no data yet"));
-      }
-    }
-    split.append(right);
-    body.append(split);
-
-    // Align each right-hand trend block to its matching left row height,
-    // so the two columns read across as one table.
-    requestAnimationFrame(() => alignAlmanacRows(body));
+    body.append(el("table", { className: "almanac" }, el("thead", {}, head), rows));
   }, { defaultClosed: false });
 
   card.append(c.head, c.body);
   return card;
 }
 
-function alignAlmanacRows(scope) {
-  // Match each trend-section's height to its section's matrix row, so
-  // "day" on the left lines up with "day" on the right.
-  for (const sec of SECTIONS) {
-    const row = scope.querySelector(`tr[data-sec="${sec}"]`);
-    const trend = scope.querySelector(`.trend-section[data-sec="${sec}"]`);
-    if (row && trend) trend.style.height = row.offsetHeight + "px";
+// A quarter-width glance: no axes, no numbers on the x-axis, just shape.
+// Gold = trust accumulating, grey = the target itself settling.
+function sparklineCell(sd, thresholds) {
+  if (!sd || sd.generated_at.length < 2) {
+    return el("span", { className: "faint" },
+      sd && sd.generated_at.length === 1 ? "one snapshot so far" : "no data yet");
   }
+
+  const trust = sd.trust_weight;
+  const trustNow = trust.at(-1), trustPrev = trust.at(-2);
+  const rising = trustNow > trustPrev, falling = trustNow < trustPrev;
+  const trustClass = thresholds && trustNow >= thresholds.high ? "ok"
+    : thresholds && trustNow >= thresholds.medium ? "" : "faint";
+
+  const W = 96, H = 28, pad = 3;
+  const spark = (values, colour) => {
+    const pts = [];
+    values.forEach((v, i) => {
+      if (v == null) return;
+      pts.push([i, v]);
+    });
+    if (pts.length < 2) return "";
+    const lo = Math.min(...pts.map(p => p[1])), hi = Math.max(...pts.map(p => p[1]));
+    const span = hi - lo || 1;
+    const step = (W - pad * 2) / (values.length - 1);
+    const d = pts.map(([i, v], k) => {
+      const x = pad + i * step;
+      const y = H - pad - ((v - lo) / span) * (H - pad * 2);
+      return `${k === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
+    return `<path d="${d}" fill="none" stroke="${colour}" stroke-width="1.6" `
+         + `stroke-linecap="round" stroke-linejoin="round"/>`;
+  };
+
+  const svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
+    + spark(sd.lux_target, "#8b93a7") + spark(trust, "#f0b429") + `</svg>`;
+
+  const wrap = el("div", { className: "spark-wrap" });
+  wrap.innerHTML = svg;
+  wrap.append(el("span", { className: "spark-trust " + trustClass },
+    `${trustNow}${rising ? " \u2191" : falling ? " \u2193" : ""}`));
+  return wrap;
 }
 
-function drawTrend(host, sd, thresholds) {
-  const xs = sd.generated_at.map(t => Math.floor(new Date(t).getTime() / 1000));
-  const opts = {
-    width: host.clientWidth || 420, height: 90,
-    scales: { x: { time: true }, lux: {}, trust: {} },
-    axes: [
-      { stroke: "#5a6274", size: 24, grid: { stroke: "#272c3833" } },
-      { scale: "lux", stroke: "#8b93a7", size: 34, grid: { stroke: "#272c3822" } },
-      { scale: "trust", side: 1, stroke: "#f0b429", size: 30, grid: { show: false } },
-    ],
-    series: [
-      {},
-      { label: "lux", scale: "lux", stroke: "#e6e9f0", width: 2, points: { show: true, size: 4 } },
-      { label: "trust", scale: "trust", stroke: "#f0b429", width: 1.5,
-        points: { show: false }, dash: [] },
-    ],
-    hooks: { draw: [(u) => {
-      // threshold reference lines on the trust scale
-      const ctx = u.ctx; ctx.save();
-      ctx.setLineDash([3, 3]); ctx.strokeStyle = "rgba(240,180,41,0.3)";
-      for (const key of ["medium", "high"]) {
-        const y = u.valToPos(thresholds[key], "trust", true);
-        ctx.beginPath(); ctx.moveTo(u.bbox.left, y);
-        ctx.lineTo(u.bbox.left + u.bbox.width, y); ctx.stroke();
-      }
-      ctx.restore();
-    }] },
-    legend: { show: false },
-    cursor: { show: true },
-  };
-  const data = [xs, sd.lux_target, sd.trust_weight];
-  almanacCharts.push(new uPlot(opts, data, host));
-}
 
 async function rebuildAlmanac(roomId) {
   try {
@@ -1237,7 +1156,6 @@ function stub(title, description) {
 function go(name) {
   if (nowTimer && name !== "now") { clearInterval(nowTimer); nowTimer = null; }
   if (analysisChart && name !== "analysis") { analysisChart.destroy(); analysisChart = null; }
-  if (name !== "almanac") destroyAlmanacCharts();
   for (const b of $("#tabs").children) b.classList.toggle("active", b.dataset.view === name);
   location.hash = name;
   (VIEWS[name] || VIEWS.config)();
