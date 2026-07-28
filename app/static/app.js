@@ -172,6 +172,8 @@ function renderConfig() {
     syncSceneGroups(room);
     const card = el("div", { className: "card" });
 
+    // Everything is appended to `card` as before; afterwards the head is
+    // kept visible and the remaining children fold into a collapsible.
     card.append(el("div", { className: "room-head" },
       (() => {
         const i = el("input", { className: "room-name", value: room.name,
@@ -302,7 +304,32 @@ function renderConfig() {
       body.append(tr);
     }
     card.append(el("table", { className: "scene-grid" }, el("thead", {}, head), body));
-    view.append(card);
+
+    // Presence Rules - reserved for future per-room occupancy logic.
+    card.append(el("div", { className: "sep" }));
+    const presence = collapsible(`presence:${room.id}`,
+      el("h2", { style: "margin:0" }, "Presence rules",
+         el("span", { className: "pill accent", style: "margin-left:8px" }, "coming soon")),
+      (pb) => pb.append(el("p", { className: "hint" },
+        "How occupancy should affect this room \u2014 for example dimming when " +
+        "empty, or holding a scene while someone is present. Not yet implemented; " +
+        "this space is reserved.")),
+      { defaultClosed: true });
+    card.append(presence.head, presence.body);
+
+    // Fold the whole room: keep the head visible, collapse the rest.
+    const roomHead = card.querySelector(".room-head");
+    const rc = collapsible(`room:${room.id}`,
+      roomHead,
+      (rb) => {
+        // Move every card child except the head into the collapsible body.
+        const kids = [...card.childNodes].filter(n => n !== roomHead);
+        for (const k of kids) rb.append(k);
+      },
+      { defaultClosed: index !== 0 });
+    const shell = el("div", { className: "card" });
+    shell.append(rc.head, rc.body);
+    view.append(shell);
   }
 
   if (!cfg.rooms.length) {
