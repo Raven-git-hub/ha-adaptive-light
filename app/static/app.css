@@ -250,3 +250,90 @@ td.detail { font-family: var(--mono); font-size: 11.5px; color: var(--faint); }
 .toast.ok  { border-color: #3fb95088; }
 .toast.err { border-color: #f8514988; }
 @keyframes rise { from { opacity: 0; transform: translateY(9px); } }
+
+/* ---------- Now -------------------------------------------------- */
+
+.now-room { }
+.now-room > h2 .sub { font-weight: 400; color: var(--muted); font-size: 12.5px; }
+
+.lux-gauge { margin: 4px 0 18px; }
+.lux-gauge .readout {
+  display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px;
+}
+.lux-gauge .readout .big {
+  font-family: var(--mono); font-size: 30px; color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.lux-gauge .readout .unit { color: var(--faint); font-size: 13px; }
+.lux-gauge .readout .vs { color: var(--muted); font-size: 13px; }
+
+/* The band is the maintenance deadband; the needle is measured lux.
+   Needle inside the shaded band means the loop is content. */
+.band {
+  position: relative; height: 30px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 5px; overflow: hidden;
+}
+.band .target-zone {
+  position: absolute; top: 0; bottom: 0;
+  background: var(--accent-dim); opacity: .35;
+}
+.band .target-line {
+  position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent);
+}
+.band .needle {
+  position: absolute; top: -3px; bottom: -3px; width: 3px;
+  background: var(--text); border-radius: 2px;
+  transition: left .5s ease;
+}
+.band .needle.out { background: var(--warn); }
+.band .scale {
+  position: absolute; bottom: 2px; left: 6px; right: 6px;
+  display: flex; justify-content: space-between;
+  font-family: var(--mono); font-size: 10px; color: var(--faint);
+  pointer-events: none;
+}
+
+.grp-row {
+  display: grid;
+  grid-template-columns: 1.4fr auto 1fr auto;
+  gap: 12px; align-items: center;
+  padding: 9px 0; border-bottom: 1px solid var(--border);
+}
+.grp-row:last-child { border-bottom: none; }
+.grp-row .gname { font-weight: 500; }
+.grp-row .bmeter {
+  height: 6px; border-radius: 3px; background: var(--bg);
+  border: 1px solid var(--border); position: relative; min-width: 80px;
+}
+.grp-row .bmeter .fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: var(--accent); border-radius: 3px; transition: width .5s;
+}
+.grp-row .bmeter .tmark {
+  position: absolute; top: -2px; bottom: -2px; width: 2px;
+  background: var(--muted);
+}
+.grp-row .bval {
+  font-family: var(--mono); font-size: 12px; color: var(--muted);
+  text-align: right; min-width: 86px;
+}
+.grp-row .off .bval { color: var(--faint); }
+
+.timeline {
+  display: flex; gap: 3px; margin: 6px 0 4px;
+}
+.timeline .seg {
+  flex: 1; padding: 7px 4px; text-align: center;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  font-size: 11px; color: var(--muted);
+}
+.timeline .seg.current {
+  background: var(--accent); color: #17130a; border-color: var(--accent);
+  font-weight: 600;
+}
+.timeline .seg.collapsed { opacity: .4; text-decoration: line-through; }
+.timeline .seg .st { display: block; font-family: var(--mono); font-size: 10px; opacity: .8; }
+
+.countdown { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+.countdown b { color: var(--accent); font-family: var(--mono); }

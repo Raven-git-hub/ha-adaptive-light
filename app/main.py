@@ -323,6 +323,81 @@ def api_schedule_preview(room_id: str | None = None, days: int = 365) -> dict:
 
 
 # ---------------------------------------------------------------------
+# Now - the live comparison the dashboard renders
+# ---------------------------------------------------------------------
+
+@app.get("/api/now/{room_id}")
+async def api_now(room_id: str) -> dict:
+    """What the almanac wants versus what the room is actually doing,
+    right now. One HA read per group plus the sensors, joined to the
+    current almanac section."""
+    if not state.runtime:
+        raise HTTPException(status_code=409, detail="not connected to Home Assistant")
+    rs = state.runtime.rooms.get(room_id)
+    if rs is None:
+        raise HTTPException(status_code=404, detail=f"no such room: {room_id}")
+
+    section = rs.fired_section
+    almanac = state.store.current_almanac(room_id) if state.store else None
+    entry = (almanac or {}).get(section) if section else None
+
+    lux, sensor_n = await state.runtime._read_lux(rs.room)
+    occupied = await state.runtime._read_presence(rs.room)
+
+    groups = []
+    for group in rs.room.groups:
+        st = await state.runtime.rest.state(group.entity_id)
+        on = bool(st and st.get("state") == "on")
+        brightness = None
+        if on:
+            b = st.get("attributes", {}).get("brightness")
+            brightness = int(b) if b is not None else None
+        target = entry.get(group.id) if isinstance(entry, dict) else None
+        mode = "auto"
+        if isinstance(entry, dict):
+            mode = "off" if target == 0 else "auto"
+        groups.append({
+            "id": group.id, "name": group.name, "entity_id": group.entity_id,
+            "on": on, "brightness": brightness,
+            "target": target, "mode": mode,
+            "on_fraction": (entry.get("on_fraction", {}) or {}).get(group.id)
+                           if isinstance(entry, dict) else None,
+        })
+
+    lux_target = entry.get("lux_target") if isinstance(entry, dict) else None
+    lux_margin = entry.get("lux_margin", 5) if isinstance(entry, dict) else 5
+    maintenance = entry.get("maintenance_enabled") if isinstance(entry, dict) else None
+
+    in_band = None
+    if lux is not None and lux_target is not None:
+        in_band = abs(lux - lux_target) <= lux_margin
+
+    # The next boundary, so the page can count down to it.
+    next_at = next_name = None
+    if state.runtime.sun and state.runtime.tz:
+        from datetime import datetime as _dt
+        from app.scheduler import compute_day
+        now = _dt.now(state.runtime.tz)
+        for b in compute_day(rs.room.schedule, state.runtime.sun, now.date(),
+                             state.runtime.tz):
+            if b.ran and b.planned and b.planned > now:
+                next_at, next_name = b.planned.isoformat(), b.name
+                break
+
+    return {
+        "room_id": room_id, "name": rs.room.name,
+        "section": section, "guard": rs.guard_on, "hold": rs.hold_on,
+        "occupied": occupied,
+        "lux": lux, "lux_sensors": sensor_n,
+        "lux_target": lux_target, "lux_margin": lux_margin, "in_band": in_band,
+        "maintenance_enabled": maintenance,
+        "almanac_mode": (almanac or {}).get("_meta", {}).get("mode"),
+        "groups": groups,
+        "next_section": next_name, "next_at": next_at,
+    }
+
+
+# ---------------------------------------------------------------------
 # Static UI
 # ---------------------------------------------------------------------
 

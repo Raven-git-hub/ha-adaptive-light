@@ -14,7 +14,8 @@
 | 5b-iv | Runtime: scheduler, observer, reactive detector, almanac push | **done** — `app/runtime.py` |
 | 6a | Config API and deployment to Home Assistant | **done** — `app/deploy.py`, endpoints in `app/main.py` |
 | 6b | UI shell, status strip, Config and Log | **done** — `app/static/` |
-| 7 | UI — Now and Analysis | next |
+| 7a | UI — Now (live dashboard) | **done** — `/api/now`, Now view |
+| 7b | UI — Analysis (day chart, uPlot) | next |
 | 8 | UI — Almanac, with the auto/off control | |
 | 9 | Home Assistant add-on packaging | |
 

@@ -462,14 +462,153 @@ async function renderLog() {
 }
 
 /* ------------------------------------------------------------------
+   Now
+   ------------------------------------------------------------------ */
+
+let nowTimer = null;
+
+async function renderNow() {
+  const view = $("#view");
+  if (nowTimer) { clearInterval(nowTimer); nowTimer = null; }
+
+  const rooms = Object.keys(status.rooms || {});
+  if (!rooms.length) {
+    view.replaceChildren(el("div", { className: "empty" },
+      "No rooms configured yet. Add one on the Config tab."));
+    return;
+  }
+
+  const paint = async () => {
+    // Leaving the Now view cancels the timer; guard against a late paint.
+    if (!location.hash.startsWith("#now") && location.hash !== "") return;
+    let cards;
+    try {
+      cards = await Promise.all(rooms.map(id =>
+        api("/api/now/" + id).catch(() => null)));
+    } catch { return; }
+    view.replaceChildren(...cards.filter(Boolean).map(nowCard));
+    if (!cards.some(Boolean)) {
+      view.replaceChildren(el("div", { className: "empty" },
+        "Not connected to Home Assistant."));
+    }
+  };
+  await paint();
+  nowTimer = setInterval(paint, 10000);
+}
+
+function nowCard(n) {
+  const card = el("div", { className: "card now-room" });
+
+  const modePill = n.almanac_mode
+    ? el("span", { className: "pill accent" }, n.almanac_mode)
+    : el("span", { className: "pill" }, "no almanac");
+  card.append(el("h2", {}, n.name,
+    el("span", { className: "sub" },
+      n.section ? ` \u00b7 ${n.section}` : " \u00b7 waiting for first crossover"),
+    modePill,
+    n.hold ? el("span", { className: "pill warn" }, "maintenance held") : null,
+    n.guard ? el("span", { className: "pill" }, "adjusting\u2026") : null,
+    el("span", { className: "pill " + (n.occupied ? "ok" : ""),
+                 style: "margin-left:auto" }, n.occupied ? "occupied" : "empty")));
+
+  /* lux gauge */
+  const g = el("div", { className: "lux-gauge" });
+  const luxTxt = n.lux == null ? "\u2014" : n.lux.toFixed(1);
+  g.append(el("div", { className: "readout" },
+    el("span", { className: "big" }, luxTxt),
+    el("span", { className: "unit" }, "lux measured"),
+    n.lux_target != null
+      ? el("span", { className: "vs" }, `target ${n.lux_target} \u00b1${n.lux_margin}`)
+      : el("span", { className: "vs" }, "no target yet"),
+    n.maintenance_enabled === false
+      ? el("span", { className: "pill", style: "margin-left:auto" },
+           "maintenance off this section")
+      : null));
+
+  if (n.lux != null && n.lux_target != null) {
+    // Scale to whichever is larger: the reading or twice the target,
+    // so the needle and band both stay on-screen through the day.
+    const scaleMax = Math.max(n.lux * 1.15, (n.lux_target + n.lux_margin) * 1.6, 10);
+    const pct = (v) => Math.max(0, Math.min(100, (v / scaleMax) * 100));
+    const band = el("div", { className: "band" });
+    const lo = pct(Math.max(0, n.lux_target - n.lux_margin));
+    const hi = pct(n.lux_target + n.lux_margin);
+    band.append(
+      el("div", { className: "target-zone",
+                  style: `left:${lo}%;width:${hi - lo}%` }),
+      el("div", { className: "target-line", style: `left:${pct(n.lux_target)}%` }),
+      el("div", { className: "needle" + (n.in_band ? "" : " out"),
+                  style: `left:${pct(n.lux)}%` }),
+      el("div", { className: "scale" },
+        el("span", {}, "0"), el("span", {}, scaleMax.toFixed(0))));
+    g.append(band);
+  }
+  card.append(g);
+
+  /* groups */
+  for (const grp of n.groups) {
+    const row = el("div", { className: "grp-row" + (grp.on ? "" : " off") });
+    const meter = el("div", { className: "bmeter" });
+    if (grp.on && grp.brightness != null) {
+      meter.append(el("div", { className: "fill",
+        style: `width:${(grp.brightness / 255 * 100).toFixed(0)}%` }));
+    }
+    if (grp.target != null && grp.target > 0) {
+      meter.append(el("div", { className: "tmark",
+        style: `left:${(grp.target / 255 * 100).toFixed(0)}%` }));
+    }
+    const state = grp.mode === "off"
+      ? "forced off"
+      : grp.on ? `${grp.brightness ?? "on"}` : "off";
+    const target = grp.mode === "off" ? "\u2014"
+      : grp.target == null ? "unlearned"
+      : grp.target === 0 ? "off" : `\u2192 ${grp.target}`;
+    row.append(
+      el("div", { className: "gname" }, grp.name,
+        grp.mode === "off" ? el("span", { className: "pill",
+                                          style: "margin-left:8px" }, "off") : null),
+      el("div", {}, grp.on
+        ? el("span", { className: "pill ok" }, "on")
+        : el("span", { className: "pill" }, "off")),
+      meter,
+      el("div", { className: "bval" }, `${state}  ${target}`));
+    card.append(row);
+  }
+
+  /* section timeline + countdown */
+  card.append(el("div", { className: "sep" }));
+  const tl = el("div", { className: "timeline" });
+  for (const s of SECTIONS) {
+    tl.append(el("div",
+      { className: "seg" + (s === n.section ? " current" : "") }, s));
+  }
+  card.append(tl);
+
+  if (n.next_at) {
+    card.append(el("div", { className: "countdown" },
+      "Next: ", el("b", {}, n.next_section), " at ",
+      el("b", {}, new Date(n.next_at).toLocaleTimeString(
+        [], { hour: "2-digit", minute: "2-digit" })),
+      " \u00b7 ", countdownText(n.next_at)));
+  }
+  return card;
+}
+
+function countdownText(iso) {
+  const mins = Math.max(0, (new Date(iso) - Date.now()) / 60000);
+  if (mins < 60) return `in ${mins | 0} min`;
+  const h = Math.floor(mins / 60), m = (mins % 60) | 0;
+  return `in ${h}h ${m}m`;
+}
+
+/* ------------------------------------------------------------------
    Routing
    ------------------------------------------------------------------ */
 
 const VIEWS = {
   config: loadConfig,
   log: renderLog,
-  now: () => stub("Now", "Current section, targets against measured lux, and " +
-                         "what each group is actually doing."),
+  now: renderNow,
   analysis: () => stub("Analysis", "Measured lux against target with the margin " +
                                    "band, per-group brightness, section bands and " +
                                    "reactive markers."),
@@ -484,6 +623,7 @@ function stub(title, description) {
 }
 
 function go(name) {
+  if (nowTimer && name !== "now") { clearInterval(nowTimer); nowTimer = null; }
   for (const b of $("#tabs").children) b.classList.toggle("active", b.dataset.view === name);
   location.hash = name;
   (VIEWS[name] || VIEWS.config)();
