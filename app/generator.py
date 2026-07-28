@@ -152,6 +152,23 @@ def build_scene_automation(config: dict, room: dict, section: dict) -> dict:
 
     for group in room["groups"]:
         gid, entity = group["id"], group["entity_id"]
+        mode_g = scene_cfg.get("groups", {}).get(gid, {}).get("mode", "auto")
+
+        if mode_g == "off":
+            # An explicit override, not a learned fact. Baked in directly
+            # so it holds from the very first deploy - it must not wait
+            # on an almanac existing, or on the analyser having run.
+            # Mirrors what the analyser later publishes (0), so once an
+            # almanac exists the two agree; this just does not depend on
+            # one being there yet.
+            actions.append({
+                "alias": f"{group['name']} (off)",
+                "action": "light.turn_off",
+                "target": {"entity_id": entity},
+                "data": {"transition": transition},
+            })
+            continue
+
         has_value = (
             "{{ alm is not none and alm.get('%s') is not none }}" % gid
         )

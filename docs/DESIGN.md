@@ -294,3 +294,22 @@ intervention every ten minutes; after cutover it would mean our own
 maintenance loop being learned from as if it were the user. Neither is a
 real preference, and both would corrupt the almanac.
 
+---
+
+## 19. Off-mode groups are baked into the automation, not read from the almanac
+
+An earlier version encoded "off" for a group by relying on the almanac
+storing a brightness of 0 for it, with the scene automation checking
+`alm[group] == 0` at runtime. That made an explicit user override silently
+depend on an almanac existing at all - on the first night after deploy,
+with no almanac yet, the whole conditional was skipped and the light was
+left exactly as it was, contradicting the override entirely.
+
+Off is now baked directly into the generated automation as an
+unconditional `light.turn_off` for any group whose scene config has
+`mode: "off"`, bypassing the almanac lookup completely. It takes effect
+from the moment it is deployed, independent of whether an almanac exists,
+how old it is, or whether the analyser has ever run. The analyser still
+writes 0 for that group so the almanac and the deployed behaviour agree,
+but the deployed behaviour no longer depends on it.
+
