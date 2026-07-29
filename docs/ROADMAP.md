@@ -17,7 +17,7 @@
 | 7a | UI — Now (live dashboard) | **done** — `/api/now`, Now view |
 | 7b | UI — Analysis (day chart, uPlot) | **done** — `/api/analysis`, Analysis view, vendored uPlot |
 | 8 | Time profiles: shared schedules, per-room selection, trigger editor | **done** |
-| 9 | UI — Almanac: matrix, on_fraction, auto/off, trend charts | **done** |
+| 9 | UI — Almanac: per-section lux target with a settling-trend sparkline | **done** |
 | 10 | Home Assistant add-on packaging | next |
 
 ## Deployed
@@ -26,7 +26,7 @@ Cut over to the containerised system on 28 July 2026, running against Home
 Assistant 2026.7.4. The n8n prototype and its automations were removed. The
 container schedules crossovers, observes via heartbeats, detects manual
 adjustments, and maintains lux against the learned target; the Now, Analysis,
-Config and Log views are in use.
+Almanac, Config and Log views are in use.
 
 Issues found and fixed during and after cutover:
 

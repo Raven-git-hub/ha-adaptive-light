@@ -313,3 +313,37 @@ how old it is, or whether the analyser has ever run. The analyser still
 writes 0 for that group so the almanac and the deployed behaviour agree,
 but the deployed behaviour no longer depends on it.
 
+
+---
+
+## 20. Almanac history comes free from insert-only snapshots
+
+The nightly analysis inserts a new `almanac` row each time rather than updating
+one in place. That was originally just simplicity — `current_almanac` reads the
+latest row — but it means every almanac the system has ever computed is still
+on disk, timestamped. The Almanac page's trend sparklines are therefore a pure
+read over data that already existed; no history table, no schema change, was
+needed to show how a target settled over three weeks.
+
+`trust_weight` — the accumulated recency×confidence×settled weight behind a
+section — is the one value added for this. The analyser already computed it
+internally to bucket confidence into low/medium/high; it was simply not being
+persisted. Storing the raw number lets the UI show trust *approaching* a
+threshold rather than only the step when it crosses one. An idempotent
+migration adds the column to databases created before it existed.
+
+## 21. The Almanac view is a glance, not a second editor
+
+An earlier version of the page was a full matrix — sections down, groups
+across — with per-group brightness, `on_fraction` bars and the auto/off toggle
+duplicated from Config, plus a separate column of full charts. It was accurate
+but did too much: two side-by-side panels whose rows had to be kept aligned by
+measuring one against the other, and a second place to edit auto/off.
+
+It was cut back to one table, one row per section: the section, its learned lux
+target, and a small axis-less sparkline of how that target and its trust have
+settled. Alignment stopped being a problem the moment the trend lived in the
+same table row as its numbers rather than in a parallel panel. Editing auto/off
+belongs on Config, where the scene matrix already is; the Almanac page only
+needs to *show* what was learned. The sparkline has no axis deliberately —
+direction at a glance is the whole job, and an absent axis cannot be clipped.

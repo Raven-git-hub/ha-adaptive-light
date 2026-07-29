@@ -12,8 +12,8 @@ light controls; your switches keep working exactly as before.
 > is well proven. This repository is the rebuild: a containerised application
 > with a proper UI, deployed and running against Home Assistant 2026.7.4. The
 > full pipeline — scheduling, observation, learning, deployment, and the Now,
-> Analysis, Config and Log views — is built and in use. The remaining planned
-> work is the Almanac view and Home Assistant add-on packaging; see
+> Analysis, Almanac, Config and Log views — is built and in use. The only
+> remaining planned work is Home Assistant add-on packaging; see
 > `docs/ROADMAP.md`.
 
 ## How it works
@@ -117,6 +117,11 @@ login (it lives on your LAN).
   per section, per-group brightness, section boundaries and markers wherever
   you intervened. A day with no markers is a day the system got right. Step
   back through history with the date controls.
+- **Almanac** — the learned model per room: one row per section showing the
+  learned lux target and a compact sparkline of how that target and the
+  system's confidence in it have settled over recent nights. A rising, then
+  flattening line is convergence. A **Re-run analysis** button rebuilds the
+  almanac on demand rather than waiting for the nightly job.
 - **Config** — rooms, groups and sensors chosen from live entity pickers (a
   typo cannot silently resolve to `unknown`); the scene matrix of auto/off per
   group per section; and **Time Profiles**, with a per-section trigger editor,
@@ -189,11 +194,10 @@ python tools/compare_analyser.py heartbeat.csv      # diff two analyser versions
 
 ## Roadmap and future ideas
 
-Planned next: the **Almanac view** (the learned matrix, with the auto/off
-control and a rebuild button) and **Home Assistant add-on packaging** (which
-would remove the need for a separate Docker host).
+Planned next: **Home Assistant add-on packaging**, which would remove the need
+for a separate Docker host.
 
-Two larger ideas under consideration:
+Three larger ideas under consideration:
 
 - **Presence Rules** — configurable actions when no presence is detected in a
   section. Today occupancy only gates whether a heartbeat is eligible for
@@ -208,10 +212,18 @@ Two larger ideas under consideration:
   nap window** — a bounded afternoon section with its own target and its own
   behaviour — but the same mechanism serves a work-from-home "focus" block, a
   "dinner" section, a "wind-down" hour before Sleep, or a short "away" section
-  tied to a routine. This is the larger change of the two: the six-section
+  tied to a routine. This is the largest change of the three: the six-section
   vocabulary is currently assumed by the analyser, generator and almanac, so
   custom sections would need those to work from the profile's section list
   rather than a fixed set.
 
+- **Almanac import** — seeding a room's almanac from an uploaded set of values
+  (from another install, or drafted by hand or by an AI) so a new room does not
+  start from nothing. It would land as a bootstrap almanac — an explicit
+  starting guess, not learned data — that real observation is then free to
+  correct from the first night, rather than an override that sticks. The
+  **Re-run analysis** button is unrelated to this: it re-runs the existing
+  nightly analysis on the data already collected, it does not import anything.
+
 See `docs/ROADMAP.md` for status and `docs/DESIGN.md` for the reasoning behind
-the nineteen key decisions.
+the twenty-one key decisions.
