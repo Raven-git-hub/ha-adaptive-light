@@ -39,6 +39,11 @@ Issues found and fixed during and after cutover:
   "off" holds from first deploy instead of waiting on an almanac to exist.
 - Section runs are closed when the next fires, so Analysis target bands stop at
   the real boundary; band drawing is clamped to the plot area.
+- Maintenance nudges now appear in the Log. The maintenance loop runs inside HA
+  under the guard, which the reactive detector ignores, so nudges were never
+  observed; the runtime now attributes each guard window (scene vs maintenance)
+  and writes one `maintenance` event per nudge run without changing what is
+  learned. See DESIGN #22.
 
 ## Future ideas
 

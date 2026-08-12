@@ -52,6 +52,9 @@ log = logging.getLogger("adaptive_light.runtime")
 
 SCHEDULER_TICK_SECONDS = 20
 GUARD_WAIT_TIMEOUT_SECONDS = 90
+# How recently a crossover we fired must have run for the guard it raises to
+# be attributed to that crossover rather than to the HA-side maintenance loop.
+CROSSOVER_ATTRIB_SECONDS = 10
 PROVISIONAL_SAMPLES = 3
 PROVISIONAL_SPACING_SECONDS = 40
 
@@ -87,6 +90,16 @@ class RoomState:
     last_states: dict[str, tuple[bool, int | None]] = field(default_factory=dict)
     last_heartbeat: datetime | None = None
     seeded_sections: set[str] = field(default_factory=set)
+    # Guard-window attribution. `al_active_<room>` is raised either by a
+    # scene crossover we fire ourselves or by the maintenance time_pattern
+    # that runs inside Home Assistant and which we never initiate. Recording
+    # when we last fired a crossover lets the guard-on edge tell the two
+    # apart; `guard_reason` then flags a window as 'scene' or 'maintenance',
+    # and `nudges` collects a maintenance run's per-group before/after so the
+    # guard-off edge can flush one event.
+    own_crossover_at: datetime | None = None
+    guard_reason: str | None = None
+    nudges: dict[str, dict[str, int | None]] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------
@@ -259,7 +272,12 @@ class Runtime:
         for rs in self.rooms.values():
             rid = rs.room.id
             if entity == guard_id(rid):
-                rs.guard_on = _is_on(new)
+                was_on, now_on = rs.guard_on, _is_on(new)
+                rs.guard_on = now_on
+                if now_on and not was_on:
+                    self._open_guard_window(rs)
+                elif was_on and not now_on:
+                    self._close_guard_window(rs)
                 return
             if entity == hold_id(rid):
                 rs.hold_on = _is_on(new)
@@ -272,6 +290,20 @@ class Runtime:
             reading = _reading(new)
             previous = rs.last_states.get(entity, (False, None))
             rs.last_states[entity] = reading
+
+            # Maintenance runs entirely inside Home Assistant on its own
+            # ten-minute clock: it raises the guard and nudges brightness,
+            # so the guard-on early-return below fires and the nudge was
+            # previously never observed - invisible in the Log despite
+            # DESIGN #17 promising it was recorded. When the current guard
+            # window belongs to that loop (not a crossover we fired),
+            # collect the per-group before/after here so the guard-off edge
+            # can flush one `maintenance` event. A user tweak during this
+            # window would be mis-attributed as a nudge, but such input is
+            # already ignored today (guard on -> early return); this only
+            # adds a log line, it never becomes a learned preference.
+            if rs.guard_on and rs.guard_reason == "maintenance":
+                self._record_nudge(rs, group.id, previous, reading)
 
             # Two independent ways to know a change was not a human at a
             # switch, and either is sufficient to ignore it:
@@ -309,6 +341,74 @@ class Runtime:
         else:
             rs.window.before.setdefault(group_id, before)
         rs.window.after[group_id] = after
+
+    # -- maintenance nudges -------------------------------------------
+
+    def _open_guard_window(self, rs: RoomState) -> None:
+        """Classify a freshly-raised guard window and reset collection.
+
+        Only a crossover we fired ourselves sets `own_crossover_at`; if
+        none did so in the last few seconds the guard must have been
+        raised by the HA-side maintenance loop.
+        """
+        now = datetime.now(self.tz)
+        recent = (rs.own_crossover_at is not None
+                  and (now - rs.own_crossover_at).total_seconds()
+                  <= CROSSOVER_ATTRIB_SECONDS)
+        rs.guard_reason = "scene" if recent else "maintenance"
+        rs.nudges = {}
+
+    def _close_guard_window(self, rs: RoomState) -> None:
+        reason, nudges = rs.guard_reason, rs.nudges
+        rs.guard_reason = None
+        rs.nudges = {}
+        # guard_reason is None for a window already open at startup
+        # (_prime_states seeds guard_on without a reason): don't log that.
+        if reason == "maintenance" and nudges:
+            asyncio.create_task(self._flush_maintenance(rs, nudges))
+
+    def _record_nudge(self, rs: RoomState, group_id: str,
+                      before: tuple[bool, int | None],
+                      after: tuple[bool, int | None]) -> None:
+        # A maintenance run ramps over a 30s transition, so several
+        # state_changed events arrive per group; keep the first 'before'
+        # and the latest 'after'.
+        entry = rs.nudges.get(group_id)
+        if entry is None:
+            rs.nudges[group_id] = {"before": before[1], "after": after[1]}
+        else:
+            entry["after"] = after[1]
+
+    async def _flush_maintenance(
+            self, rs: RoomState, nudges: dict[str, dict[str, int | None]]) -> None:
+        """Write one `maintenance` event for a completed nudge run.
+
+        Dispatched as a task from the synchronous guard-off handler so the
+        lux/target enrichment can await, mirroring `_commit_reactive`.
+        """
+        deltas = {gid: v for gid, v in nudges.items()
+                  if v["before"] is not None and v["after"] is not None
+                  and v["after"] != v["before"]}
+        if not deltas:
+            return  # guard raised but every target light was off
+
+        direction = ("up" if any(v["after"] > v["before"]
+                                 for v in deltas.values()) else "down")
+        lux, _ = await self._read_lux(rs.room)
+        almanac = self.store.current_almanac(rs.room.id) or {}
+        entry = almanac.get(rs.fired_section or "")
+        lux_target = entry.get("lux_target") if isinstance(entry, dict) else None
+
+        message = f"Nudged {', '.join(deltas)} {direction}"
+        if lux is not None and lux_target is not None:
+            message += f" ({lux:g} -> target {lux_target:g} lux)"
+
+        self.store.log_event(
+            "info", "maintenance", message, rs.room.id,
+            {"direction": direction,
+             "groups": {gid: {"before": v["before"], "after": v["after"]}
+                        for gid, v in deltas.items()},
+             "lux": lux, "lux_target": lux_target})
 
     def _on_ha_restart(self, event: dict) -> None:
         # States pushed over the API do not survive a restart, so every
@@ -443,6 +543,10 @@ class Runtime:
         await self.rest.trigger_automation(entity)
         rs.fired_section = section
         rs.fired_at = now
+        # Mark the guard this crossover is about to raise as ours, so its
+        # guard-on edge is attributed to a scene change rather than to the
+        # HA-side maintenance loop.
+        rs.own_crossover_at = now
 
         # A crossover always releases the hold: the user's intervention
         # stood for the section, and the section is over.

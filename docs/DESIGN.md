@@ -347,3 +347,34 @@ same table row as its numbers rather than in a parallel panel. Editing auto/off
 belongs on Config, where the scene matrix already is; the Almanac page only
 needs to *show* what was learned. The sparkline has no axis deliberately —
 direction at a glance is the whole job, and an absent axis cannot be clipped.
+
+## 22. Maintenance nudges are observed by attributing the guard window
+
+Decision #17 promised the log records nudges, but nothing ever wrote a
+`maintenance` event. The reason is decision #9: maintenance runs entirely
+inside Home Assistant on its own clock, precisely so correction survives the
+container being down. It raises the guard (`al_active_<room>`) and steps
+brightness, and the container's reactive detector treats a raised guard as
+"an AL automation is mid-change, ignore this" and returns early — so the very
+mechanism that keeps maintenance from being *mis-learned* also kept it from
+being *seen*.
+
+The container never initiates a maintenance run, so it cannot log one at the
+source. Instead it attributes the guard window at the edges. The guard is only
+ever raised two ways: by a scene crossover the container fires itself
+(`_fire_crossover`), or by the maintenance `time_pattern` it does not. So the
+crossover stamps `own_crossover_at`; when the guard's off→on edge arrives, a
+stamp within the last few seconds means "scene", its absence means
+"maintenance". During a maintenance window the guard-on branch collects each
+group's before/after brightness (the same changes it still ignores for
+learning), and the on→off edge flushes exactly one `info`/`maintenance` event
+with direction, per-group deltas, and the current lux against the section
+target.
+
+This adds observation only inside the guard-on path; the reactive detector's
+guard / `context.parent_id` / `external_guards` logic (#18) is untouched, so
+no nudge is ever learned as a preference. A window already open at container
+startup has no attribution and is not logged, and a user tweak landing inside a
+maintenance window is mis-attributed as a nudge — but that input is already
+discarded for learning today, so the only cost is one possibly-mislabelled log
+line, not a corrupted almanac.
